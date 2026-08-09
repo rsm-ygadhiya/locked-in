@@ -1,0 +1,17 @@
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+
+# build output
+macos/.build/
+*.o
+*.dSYM/
+
+# generated icon intermediates (rebuild with ./macos/build.sh --icon)
+**/AppIcon.iconset/
+icon_1024.png
+
+# session recordings the lockdown writes to the Desktop
+guided-access-*.mov
+guided-access-*.mkv
