@@ -3,21 +3,20 @@
 # guided-access.command  —  a Chrome "Guided Access" / single-site lockdown for macOS
 #
 # What it does:
-#   1. Starts recording the whole screen to a .mov file on your Desktop
-#   2. Locks Chrome via managed policy: incognito OFF, DevTools OFF, only the
+#   1. Locks Chrome via managed policy: incognito OFF, DevTools OFF, only the
 #      allowed sites reachable (this layer even applies inside incognito)
-#   3. Asks you to set a passcode (used later to unlock)
-#   4. Force-quits every other app, then opens Chrome fullscreen (kiosk: no Dock,
+#   2. Asks you to set a passcode (used later to unlock)
+#   3. Force-quits every other app, then opens Chrome fullscreen (kiosk: no Dock,
 #      no menu bar) — you can't get out of the screen
-#   5. Any other app is hidden; you're snapped back to Chrome
-#   6. Inside Chrome, every page except the allowed sites is redirected back
-#   7. If Chrome is ever closed it is relaunched immediately, and Guided Access
+#   4. Any other app is hidden; you're snapped back to Chrome
+#   5. Inside Chrome, every page except the allowed sites is redirected back
+#   6. If Chrome is ever closed it is relaunched immediately, and Guided Access
 #      does NOT end — the ONLY way to end it is entering the passcode
-#   8. To exit: quit Chrome (Cmd+Q) then enter your passcode. Recording is saved,
-#      Chrome policy is removed, and Chrome is closed so normal browsing returns.
+#   7. To exit: quit Chrome (Cmd+Q) then enter your passcode. Chrome policy is
+#      removed and Chrome is closed so normal browsing returns.
 #
 # The site you actually want:
-ALLOWED_URL="https://rsm-django-02.ucsd.edu/mgta403/"
+ALLOWED_URL="https://rsm-django-02.ucsd.edu/video-exam/station/"
 # Hosts allowed to load (target site + UCSD SSO + Duo 2FA so login works):
 ALLOW_HOSTS=("rsm-django-02.ucsd.edu" "ucsd.edu" "duosecurity.com")
 # Fixed unlock passcode — change this to whatever you want. It is stored in plain
@@ -29,22 +28,15 @@ UNLOCK_PASSCODE="letmeout"
 #   Force Quit (Cmd+Opt+Esc) or a reboot can still defeat it. Disabling incognito/
 #   DevTools edits a Chrome managed-policy file, which needs your admin password;
 #   on some managed Macs the policy may not apply, but the in-Chrome redirect layer
-#   still blocks navigation. First run also asks for Automation / Accessibility /
-#   Screen Recording permission (System Settings > Privacy & Security).
+#   still blocks navigation. First run also asks for Automation / Accessibility
+#   permission (System Settings > Privacy & Security).
 
 CHROME_MP="/Library/Managed Preferences/com.google.Chrome"
-
-# ---------- Start the screen recording ----------
-STAMP=$(date +%Y%m%d-%H%M%S)
-OUTPUT="$HOME/Desktop/guided-access-$STAMP.mov"
-screencapture -v -C "$OUTPUT" &
-REC_PID=$!
 
 # ---------- Get admin rights for the Chrome policy ----------
 echo "Guided Access needs your admin password to lock Chrome (disable incognito + DevTools)..."
 if ! sudo -v; then
 	echo "No admin password provided — cannot lock Chrome settings. Exiting."
-	kill -INT "$REC_PID" 2>/dev/null
 	exit 1
 fi
 # Keep the sudo timestamp alive so cleanup works after a long session.
@@ -61,7 +53,6 @@ remove_policy() {
 
 # ALWAYS undo everything on exit, even on crash / Ctrl+C.
 cleanup() {
-	kill -INT "$REC_PID" 2>/dev/null
 	remove_policy
 	kill "$KEEPALIVE_PID" 2>/dev/null
 	killall "Google Chrome" 2>/dev/null
@@ -201,17 +192,11 @@ end run
 
 APPLESCRIPT
 
-# ---------- Stop recording, undo policy, finalize ----------
-kill -INT "$REC_PID" 2>/dev/null
-wait "$REC_PID" 2>/dev/null
-sleep 1
+# ---------- Undo policy, finalize ----------
 remove_policy
 kill "$KEEPALIVE_PID" 2>/dev/null
 killall "Google Chrome" 2>/dev/null
 
 osascript <<END
-display dialog "Guided Access ended. Chrome is unlocked (incognito + DevTools restored) and you can browse normally again.
-
-Screen recording saved to:
-$OUTPUT" buttons {"OK"} default button "OK" with title "Guided Access"
+display dialog "Guided Access ended. Chrome is unlocked (incognito + DevTools restored) and you can browse normally again." buttons {"OK"} default button "OK" with title "Guided Access"
 END

@@ -2,13 +2,12 @@
   guided-access.ps1  —  a Chrome "Guided Access" / single-site lockdown for Windows
 
   Local focus/kiosk tool (Windows version of guided-access.command). It:
-    1. (optional) records the screen if ffmpeg is installed
-    2. Locks Chrome via registry policy: incognito OFF, DevTools OFF, only allowed sites
-    3. Force-quits other visible apps
-    4. Opens Chrome in --kiosk mode at the one allowed URL
-    5. Relaunches Chrome instantly if closed; you CANNOT quit without the passcode
-    6. The unlock prompt keeps returning until the correct passcode is entered
-    7. On exit: policy removed, recording stopped, Chrome closed
+    1. Locks Chrome via registry policy: incognito OFF, DevTools OFF, only allowed sites
+    2. Force-quits other visible apps
+    3. Opens Chrome in --kiosk mode at the one allowed URL
+    4. Relaunches Chrome instantly if closed; you CANNOT quit without the passcode
+    5. The unlock prompt keeps returning until the correct passcode is entered
+    6. On exit: policy removed, Chrome closed
 
   NOTE: This is a "soft" lockdown for focus/self-control, NOT a secure exam browser.
   Task Manager, a reboot, Win+Tab, or a second device can still defeat it. Needs
@@ -19,14 +18,12 @@
 #>
 
 # ===================== CONFIG =====================
-$AllowedUrl      = "https://rsm-django-02.ucsd.edu/mgta403/"
+$AllowedUrl      = "https://rsm-django-02.ucsd.edu/video-exam/station/"
 # Hosts allowed to load (target site + UCSD SSO + Duo 2FA so login works):
 $AllowHosts      = @("rsm-django-02.ucsd.edu", "ucsd.edu", "duosecurity.com")
 # Fixed unlock passcode — change this. Stored in PLAIN TEXT here (fine for
 # self-control, not a real secret).
 $UnlockPasscode  = "letmeout"
-# Screen recording: only works if ffmpeg.exe is on your PATH. Off by default.
-$EnableRecording = $false
 # =================================================
 
 # ---------- Self-elevate to Administrator ----------
@@ -78,23 +75,6 @@ function Remove-Policy {
     Remove-Item (Join-Path $PolicyBase "URLAllowlist") -Recurse -Force -ErrorAction SilentlyContinue
     Remove-ItemProperty -Path $PolicyBase -Name "IncognitoModeAvailability"  -ErrorAction SilentlyContinue
     Remove-ItemProperty -Path $PolicyBase -Name "DeveloperToolsAvailability" -ErrorAction SilentlyContinue
-}
-
-# ---------- Screen recording (optional, needs ffmpeg) ----------
-$RecProc   = $null
-$RecOutput = Join-Path ([Environment]::GetFolderPath("Desktop")) ("guided-access-{0}.mkv" -f (Get-Date -Format "yyyyMMdd-HHmmss"))
-function Start-Recording {
-    if (-not $EnableRecording) { return }
-    $ff = Get-Command ffmpeg -ErrorAction SilentlyContinue
-    if (-not $ff) { return }
-    $script:RecProc = Start-Process -FilePath $ff.Source `
-        -ArgumentList "-y -f gdigrab -framerate 15 -i desktop `"$RecOutput`"" `
-        -WindowStyle Hidden -PassThru
-}
-function Stop-Recording {
-    if ($script:RecProc -and -not $script:RecProc.HasExited) {
-        try { Stop-Process -Id $script:RecProc.Id -Force -ErrorAction SilentlyContinue } catch {}
-    }
 }
 
 # ---------- Keep Chrome in front / hide others ----------
@@ -165,7 +145,6 @@ function Show-PasscodePrompt {
 
 # ================= RUN =================
 try {
-    Start-Recording
     Apply-Policy
     Get-Process chrome -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 1
@@ -192,9 +171,6 @@ try {
 }
 finally {
     Remove-Policy
-    Stop-Recording
     Get-Process chrome -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-    $msg = "Guided Access ended. Chrome is unlocked again."
-    if ($EnableRecording) { $msg += "`r`nRecording (if ffmpeg was present): $RecOutput" }
-    [System.Windows.Forms.MessageBox]::Show($msg, "Guided Access") | Out-Null
+    [System.Windows.Forms.MessageBox]::Show("Guided Access ended. Chrome is unlocked again.", "Guided Access") | Out-Null
 }

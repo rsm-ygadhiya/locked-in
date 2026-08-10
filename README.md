@@ -21,8 +21,7 @@ out without a passcode.
 | **No escape hatches** | Incognito disabled, DevTools disabled |
 | **Other apps killed** | Non-system apps are quit; you're snapped back to Chrome |
 | **Can't quit** | Closing Chrome relaunches it and demands the passcode — the prompt keeps returning |
-| **Recording** | macOS records the screen automatically; Windows only if `ffmpeg` is on `PATH` |
-| **Always cleans up** | Policy removed, recording stopped, Chrome unlocked on exit — even on Ctrl+C or crash |
+| **Always cleans up** | Policy removed, Chrome unlocked on exit — even on Ctrl+C or crash |
 
 ---
 
@@ -64,7 +63,7 @@ this whole folder to both machines (USB / iCloud / OneDrive) and use whichever a
 3. Terminal opens and runs the lockdown. Enter your Mac admin password when asked —
    it's needed to write the Chrome managed-preferences policy.
 
-First run also prompts for **Automation**, **Accessibility**, and **Screen Recording**
+First run also prompts for **Automation** and **Accessibility**
 permission in System Settings → Privacy & Security.
 
 To exit: quit Chrome (⌘Q), then enter the passcode.
@@ -88,7 +87,7 @@ Both platforms have the same three knobs, at the top of their lockdown script.
 `Locked In.app/Contents/Resources/guided-access.command`):
 
 ```bash
-ALLOWED_URL="https://rsm-django-02.ucsd.edu/mgta403/"
+ALLOWED_URL="https://rsm-django-02.ucsd.edu/video-exam/station/"
 ALLOW_HOSTS=("rsm-django-02.ucsd.edu" "ucsd.edu" "duosecurity.com")
 UNLOCK_PASSCODE="letmeout"
 ```
@@ -96,10 +95,9 @@ UNLOCK_PASSCODE="letmeout"
 **Windows** — `windows/guided-access.ps1`:
 
 ```powershell
-$AllowedUrl      = "https://rsm-django-02.ucsd.edu/mgta403/"
+$AllowedUrl      = "https://rsm-django-02.ucsd.edu/video-exam/station/"
 $AllowHosts      = @("rsm-django-02.ucsd.edu", "ucsd.edu", "duosecurity.com")
 $UnlockPasscode  = "letmeout"
-$EnableRecording = $false     # needs ffmpeg on PATH
 ```
 
 `ucsd.edu` and `duosecurity.com` are in the allowlist so SSO login and Duo 2FA still
@@ -133,8 +131,8 @@ If you forget the passcode:
 - **macOS** — Ctrl+C in the Terminal window, or Force Quit (⌘⌥Esc), or reboot
 - **Windows** — close the PowerShell window, or kill it from Task Manager, or reboot
 
-Cleanup (removing the Chrome policy, stopping the recording) runs automatically on exit
-either way, so Chrome always goes back to normal.
+Cleanup (removing the Chrome policy) runs automatically on exit either way, so Chrome
+always goes back to normal.
 
 ---
 
