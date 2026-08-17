@@ -148,21 +148,21 @@ def run(cloud: lockedin_cloud.Cloud, session_id: str, session_dir: Path,
 
 def load_token(path: Path) -> dict:
     """
-    Read the credential handed over by student_session.py, then remove it.
+    Read the credential handed over by student_session.py.
 
-    Deleting it immediately is the point: it is a bearer token sitting in a file,
-    and it only needs to survive the half-second between the two processes.
+    This used to delete the file straight after reading it. It no longer can: the
+    lockdown needs the same token at the very end, to ask the server whether the
+    exit code a proctor just typed is correct. The lockdown scrubs it during
+    cleanup instead, so it lives exactly as long as the session does.
+
+    Leaving it there is not much of an exposure — it is the student's own token,
+    granting the student's own access, on the student's own machine. It cannot
+    read the exit code; verify_exit_code only ever answers yes or no.
     """
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as error:
         raise SystemExit(f"uploader: could not read the token file: {error}")
-    finally:
-        try:
-            path.unlink(missing_ok=True)
-        except OSError:
-            pass
-    return data
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -172,7 +172,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--session-id", required=True,
                        help="the sessions.id row this belongs to")
     parser.add_argument("--token-file", required=True,
-                       help="JSON with access_token / refresh_token; deleted on read")
+                       help="JSON with access_token / refresh_token; the lockdown scrubs it")
     parser.add_argument("--interval", type=float, default=0.0,
                        help="seconds between publishes (default: from the config)")
     args = parser.parse_args(argv)

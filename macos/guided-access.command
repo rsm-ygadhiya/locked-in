@@ -52,6 +52,7 @@ RECORDER=""
 CONFIG_PY=""
 CHECKIN_PY=""
 UPLOADER_PY=""
+CLOUD_PY=""
 for candidate in "$SCRIPT_DIR/recorder.py" "$SCRIPT_DIR/../recorder.py"; do
 	if [[ -f "$candidate" ]]; then RECORDER="$candidate"; break; fi
 done
@@ -63,6 +64,9 @@ for candidate in "$SCRIPT_DIR/student_session.py" "$SCRIPT_DIR/../student_sessio
 done
 for candidate in "$SCRIPT_DIR/uploader.py" "$SCRIPT_DIR/../uploader.py"; do
 	if [[ -f "$candidate" ]]; then UPLOADER_PY="$candidate"; break; fi
+done
+for candidate in "$SCRIPT_DIR/lockedin_cloud.py" "$SCRIPT_DIR/../lockedin_cloud.py"; do
+	if [[ -f "$candidate" ]]; then CLOUD_PY="$candidate"; break; fi
 done
 
 # uv reads the dependency block inside recorder.py and installs them on first run, so
@@ -163,14 +167,15 @@ Reinstall Locked In, or clear the Supabase settings in the admin panel to run it
 	# One short Python call rather than a pile of sed: the handoff is JSON, and the
 	# allowed URL can contain characters that would need escaping anyway.
 	LIVE_SESSION_ID=""
+	LIVE_EXAM_ID=""
 	EXAM_URL=""
 	if [[ -n "$PLAIN_PY" ]]; then
-		read -r LIVE_SESSION_ID EXAM_URL < <(
+		read -r LIVE_SESSION_ID LIVE_EXAM_ID EXAM_URL < <(
 			"$PLAIN_PY" -c '
 import json, sys
 with open(sys.argv[1], encoding="utf-8") as handle:
     data = json.load(handle)
-print(data.get("session_id", ""), data.get("allowed_url", ""))
+print(data.get("session_id", ""), data.get("exam_id", ""), data.get("allowed_url", ""))
 ' "$HANDOFF" 2>/dev/null
 		)
 	fi
@@ -318,7 +323,7 @@ stop_uploading() {
 # deletes it as soon as it has read it; this is the safety net for the paths where
 # the uploader never ran.
 scrub_token() {
-	rm -f "$SESSION_DIR/token.json" 2>/dev/null
+	rm -f "$SESSION_DIR/token.json" "$SESSION_DIR/verify-exit.sh" 2>/dev/null
 }
 
 # ---------- Get admin rights for the Chrome policy ----------
@@ -366,10 +371,42 @@ sudo killall cfprefsd 2>/dev/null
 killall "Google Chrome" 2>/dev/null
 sleep 1
 
-# ---------- The lockdown (AppleScript) ----------
-# The AppleScript never sees the passcode — it pipes whatever was typed into the
-# verifier, which compares it against the stored hash and answers with its exit code.
+# ---------- What ends the lockdown ----------
+# The AppleScript never sees what was typed — it pipes it into a verifier and reads
+# the exit code.
+#
+# In a proctored exam that verifier asks the server whether this is the exam's own
+# exit code, so each exam has its own and a student cannot learn it by reading
+# anything on their machine: the hash lives in the database and the answer comes
+# back as a yes or a no.
+#
+# The local passcode stays as a fallback, and that is deliberate. If the network is
+# down at the moment a proctor tries to release a machine, refusing would leave a
+# student locked in a browser with no way out — so an unreachable server falls
+# through to the machine's own passcode rather than failing closed.
 VERIFY_CMD="$(printf '%q ' "${PY_RUNNER[@]}" "$CONFIG_PY")verify-passcode"
+
+if [[ "$PROCTORED" == true && -n "$LIVE_EXAM_ID" && -n "$CLOUD_PY" ]]; then
+	EXIT_HELPER="$SESSION_DIR/verify-exit.sh"
+	{
+		echo '#!/bin/bash'
+		echo '# Written per session by guided-access.command. Reads the typed code on'
+		echo '# stdin. 0 = correct, 1 = wrong, and an unreachable server falls back to'
+		echo '# the local passcode so nobody is ever trapped.'
+		echo 'code="$(cat)"'
+		printf 'printf %%s "$code" | %s verify-exit %q %q >/dev/null 2>&1\n' \
+			"$(printf '%q ' "${PY_RUNNER[@]}" "$CLOUD_PY")" \
+			"$LIVE_EXAM_ID" "$SESSION_DIR/token.json"
+		echo 'rc=$?'
+		echo '[[ $rc -eq 0 ]] && exit 0'
+		echo '[[ $rc -eq 1 ]] && exit 1'
+		printf 'printf %%s "$code" | %s verify-passcode >/dev/null 2>&1\n' \
+			"$(printf '%q ' "${PY_RUNNER[@]}" "$CONFIG_PY")"
+	} >"$EXIT_HELPER"
+	chmod +x "$EXIT_HELPER"
+	VERIFY_CMD="$(printf '%q' "$EXIT_HELPER")"
+	echo "Exit code: this exam's own (the machine passcode still works if the network drops)"
+fi
 
 osascript - "$ALLOWED_URL" "$VERIFY_CMD" "${ALLOW_HOSTS[@]}" <<'APPLESCRIPT'
 

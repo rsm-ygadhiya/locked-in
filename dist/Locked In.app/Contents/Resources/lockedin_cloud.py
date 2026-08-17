@@ -33,6 +33,7 @@ Use it as a library (see student_session.py), or check a project from the CLI:
 
     python3 lockedin_cloud.py check
     python3 lockedin_cloud.py login          # prompts, then prints your role
+    python3 lockedin_cloud.py verify-exit <exam-id> <token-file>   # code on stdin
 """
 
 from __future__ import annotations
@@ -406,6 +407,29 @@ class Cloud:
             return rows[0]
         return None
 
+    # ---------- exit codes ----------
+
+    def exam_has_exit_code(self, exam_id: str) -> bool:
+        """Whether this exam sets its own exit code, or falls back to the machine's."""
+        try:
+            return bool(self._json("POST", "/rest/v1/rpc/has_exit_code",
+                                   payload={"p_exam": exam_id}))
+        except CloudError:
+            return False
+
+    def verify_exit_code(self, exam_id: str, code: str) -> bool:
+        """
+        Ask the server whether this is the exam's exit code.
+
+        The check happens server-side on purpose. An exit code that the student's
+        own machine could verify offline is an exit code the student can extract
+        from their own machine — the hash never leaves the database, and this only
+        ever gets back yes or no.
+        """
+        result = self._json("POST", "/rest/v1/rpc/verify_exit_code",
+                            payload={"p_exam": exam_id, "p_code": code})
+        return result is True
+
     def heartbeat(self, session_id: str) -> None:
         """Say 'still here'. Failure is not fatal — the exam continues offline."""
         try:
@@ -487,6 +511,41 @@ def main(argv: list[str]) -> int:
         except CloudError as error:
             print(f"cloud: {error}")
             return 1
+
+    if command == "verify-exit":
+        # Used by the lockdown scripts at exit. The code arrives on stdin, never as
+        # an argument, because arguments are visible to every process on the machine
+        # — and the person typing it is the proctor, standing at a student's laptop.
+        #
+        #     verify-exit <exam-id> <token-file>   code on stdin
+        #     exit 0 correct · 1 wrong · 2 could not ask (caller should fall back)
+        if len(argv) < 3:
+            print("usage: verify-exit <exam-id> <token-file>", file=sys.stderr)
+            return 2
+        exam_id, token_path = argv[1], argv[2]
+        code = sys.stdin.read().rstrip("\r\n")
+        try:
+            cloud = Cloud.from_config()
+            token = json.loads(Path(token_path).expanduser().read_text())
+        except (CloudError, OSError, ValueError) as error:
+            print(f"cannot verify: {error}", file=sys.stderr)
+            return 2
+        cloud.session = Session(
+            user_id=token.get("user_id", ""),
+            access_token=token.get("access_token", ""),
+            refresh_token=token.get("refresh_token", ""),
+            expires_at=time.time() + 60,   # force a refresh if it has aged out
+            email=token.get("email", ""),
+            role=token.get("role", "student"),
+        )
+        try:
+            return 0 if cloud.verify_exit_code(exam_id, code) else 1
+        except CloudError as error:
+            # Offline, or the server said no in a way that is not a plain "wrong".
+            # Exit 2 tells the lockdown to fall back to the local passcode rather
+            # than trapping a student in a locked browser.
+            print(f"cannot verify: {error}", file=sys.stderr)
+            return 2
 
     if command == "login":
         import getpass

@@ -76,6 +76,29 @@ create index if not exists exams_faculty_idx on public.exams (faculty_id);
 
 
 -- ---------------------------------------------------------------------------
+-- exam_secrets
+--
+-- The exit code: what a proctor types on a student's machine to end the
+-- lockdown. It is deliberately NOT a column on exams.
+--
+-- Students can read the exams table — that is how a join code is resolved — and
+-- Row Level Security is row-level, not column-level, so anything stored there is
+-- readable by every student in the room. A separate table with its own policy is
+-- what keeps the exit code out of their reach.
+--
+-- Only the hash is stored, via pgcrypto's crypt(), so the code cannot be read
+-- back out even by the proctor who set it. Verification goes through
+-- verify_exit_code() below, which answers yes or no and never returns the hash.
+-- ---------------------------------------------------------------------------
+
+create table if not exists public.exam_secrets (
+    exam_id        uuid primary key references public.exams (id) on delete cascade,
+    exit_code_hash text        not null,
+    updated_at     timestamptz not null default now()
+);
+
+
+-- ---------------------------------------------------------------------------
 -- sessions
 --
 -- One row per student per attempt. This is the object the whole approval flow
@@ -354,11 +377,115 @@ $$;
 
 
 -- ---------------------------------------------------------------------------
+-- Exit codes, proctor accounts
+--
+-- All three run as security definer because each one needs to touch something
+-- the caller cannot reach directly — that is the point of them.
+-- ---------------------------------------------------------------------------
+
+create extension if not exists pgcrypto;
+
+-- Set (or change) an exam's exit code. Proctor of that exam only.
+create or replace function public.set_exit_code(p_exam uuid, p_code text)
+returns void
+language plpgsql security definer set search_path = public, extensions, pg_temp as $$
+begin
+    if not exists (select 1 from public.exams e
+                   where e.id = p_exam and e.faculty_id = auth.uid()) then
+        raise exception 'not your exam';
+    end if;
+    if p_code is null or length(btrim(p_code)) < 4 then
+        raise exception 'an exit code needs at least 4 characters';
+    end if;
+
+    insert into public.exam_secrets (exam_id, exit_code_hash, updated_at)
+    values (p_exam, crypt(btrim(p_code), gen_salt('bf')), now())
+    on conflict (exam_id) do update
+        set exit_code_hash = excluded.exit_code_hash, updated_at = now();
+end;
+$$;
+
+-- Answer whether a typed code is this exam's exit code. Returns a boolean and
+-- nothing else, so the hash never leaves the database.
+--
+-- Restricted to people already involved in the exam: the student sitting it, or
+-- its proctor. Without that, any signed-in account could sit and guess at every
+-- exam in the project.
+create or replace function public.verify_exit_code(p_exam uuid, p_code text)
+returns boolean
+language plpgsql security definer set search_path = public, extensions, pg_temp as $$
+declare
+    allowed boolean;
+    stored  text;
+begin
+    select exists (
+        select 1 from public.sessions s
+        where s.exam_id = p_exam and s.student_id = auth.uid()
+    ) or exists (
+        select 1 from public.exams e
+        where e.id = p_exam and e.faculty_id = auth.uid()
+    ) into allowed;
+
+    if not allowed then
+        raise exception 'not your exam';
+    end if;
+
+    select exit_code_hash into stored
+    from public.exam_secrets where exam_id = p_exam;
+
+    -- No exit code set for this exam is a "no", not an error: the lockdown falls
+    -- back to the machine's local passcode, so a student is never trapped.
+    if stored is null then
+        return false;
+    end if;
+    return stored = crypt(btrim(p_code), stored);
+end;
+$$;
+
+-- Whether an exam has an exit code at all. The student's app asks this so it can
+-- tell the student who to fetch, rather than silently rejecting what they type.
+create or replace function public.has_exit_code(p_exam uuid)
+returns boolean
+language sql stable security definer set search_path = public, pg_temp as $$
+    select exists (select 1 from public.exam_secrets where exam_id = p_exam);
+$$;
+
+-- Promote an existing account to proctor. Faculty only — this is the one action
+-- that hands someone the ability to see every student's identity documents, so
+-- it deliberately cannot be reached by a student, and cannot create an account
+-- (the dashboard registers it through the normal signup first).
+create or replace function public.promote_to_faculty(p_email text)
+returns text
+language plpgsql security definer set search_path = public, auth, pg_temp as $$
+declare
+    target uuid;
+begin
+    if not public.is_faculty() then
+        raise exception 'only a proctor can add another proctor';
+    end if;
+
+    select id into target from auth.users where lower(email) = lower(btrim(p_email));
+    if target is null then
+        raise exception 'no account exists for %', p_email;
+    end if;
+
+    update public.profiles set role = 'faculty' where id = target;
+    return p_email;
+end;
+$$;
+
+revoke all on function public.set_exit_code(uuid, text)      from anon;
+revoke all on function public.verify_exit_code(uuid, text)   from anon;
+revoke all on function public.promote_to_faculty(text)       from anon;
+
+
+-- ---------------------------------------------------------------------------
 -- Row Level Security
 -- ---------------------------------------------------------------------------
 
-alter table public.profiles    enable row level security;
-alter table public.exams       enable row level security;
+alter table public.profiles     enable row level security;
+alter table public.exams        enable row level security;
+alter table public.exam_secrets enable row level security;
 alter table public.sessions    enable row level security;
 alter table public.live_frames enable row level security;
 alter table public.events      enable row level security;
@@ -368,6 +495,7 @@ drop policy if exists profiles_read_self       on public.profiles;
 drop policy if exists profiles_read_faculty    on public.profiles;
 drop policy if exists profiles_update_self     on public.profiles;
 drop policy if exists exams_read_open          on public.exams;
+drop policy if exists secrets_owner_all         on public.exam_secrets;
 drop policy if exists exams_owner_all          on public.exams;
 drop policy if exists sessions_student_insert  on public.sessions;
 drop policy if exists sessions_student_read    on public.sessions;
@@ -410,6 +538,21 @@ create policy exams_read_open on public.exams
 create policy exams_owner_all on public.exams
     for all using (faculty_id = auth.uid() and public.is_faculty())
     with check (faculty_id = auth.uid() and public.is_faculty());
+
+-- exam_secrets -------------------------------------------------------------
+
+-- Only the owning proctor, and even they get the hash rather than the code.
+-- There is deliberately no student-facing policy here: a student's app learns
+-- whether a typed code is right by calling verify_exit_code(), never by reading.
+create policy secrets_owner_all on public.exam_secrets
+    for all using (
+        exists (select 1 from public.exams e
+                where e.id = exam_id and e.faculty_id = auth.uid())
+    )
+    with check (
+        exists (select 1 from public.exams e
+                where e.id = exam_id and e.faculty_id = auth.uid())
+    );
 
 -- sessions ------------------------------------------------------------------
 

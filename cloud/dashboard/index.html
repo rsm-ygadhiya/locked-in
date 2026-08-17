@@ -225,6 +225,9 @@
     <select id="examPick" style="width:auto;min-width:240px"></select>
     <button class="ghost small" id="newExamBtn">New exam</button>
     <button class="ghost small" id="toggleOpenBtn">—</button>
+    <button class="ghost small" id="exitCodeBtn">Exit code</button>
+    <button class="ghost small" id="deleteExamBtn">Delete exam</button>
+    <button class="ghost small" id="addProctorBtn">Add proctor</button>
     <span class="who"><span id="whoName"></span> · <a href="#" id="signOut"
       style="color:var(--accent)">sign out</a></span>
   </header>
@@ -239,13 +242,51 @@
           <input id="examTitle" placeholder="ECON 100A Midterm"></label>
         <label class="field grow"><span>Allowed site</span>
           <input id="examUrl" placeholder="https://…"></label>
-        <label class="field" style="flex:0 0 160px"><span>Join code</span>
-          <input id="examCode" class="mono" placeholder="MID24"></label>
       </div>
+      <div class="row">
+        <label class="field" style="flex:0 0 200px">
+          <span>Join code — read this out to the room</span>
+          <input id="examCode" class="mono" placeholder="MID24"
+                 autocapitalize="characters" autocorrect="off" spellcheck="false"></label>
+        <label class="field" style="flex:0 0 240px">
+          <span>Exit code — keep this to yourself</span>
+          <input id="examExit" class="mono" placeholder="at least 4 characters"
+                 autocapitalize="none" autocorrect="off" spellcheck="false"></label>
+      </div>
+      <p style="color:var(--muted);font-size:13px;margin-bottom:12px">
+        The exit code is what you type on a student's machine to end their lockdown.
+        It is stored only as a hash and is never sent to their computer, so nobody
+        can read it off their laptop. Leave it blank and the lockdown falls back to
+        that machine's own passcode.
+      </p>
       <div class="row">
         <button id="createExamBtn">Create</button>
         <button class="ghost" id="cancelExamBtn">Cancel</button>
       </div>
+    </section>
+
+    <section id="addProctor" class="card" hidden>
+      <h2 style="margin-bottom:16px">Add a proctor</h2>
+      <p style="color:var(--muted);font-size:13px;margin-bottom:14px">
+        Creates an account and gives it proctor rights. A proctor can see every
+        student's ID photo, face photo and screen for their own exams, so only add
+        people who should have that.
+      </p>
+      <div class="row">
+        <label class="field grow"><span>Full name</span>
+          <input id="proctorName" placeholder="Jane Smith"></label>
+        <label class="field grow"><span>Campus ID or email</span>
+          <input id="proctorId" autocapitalize="none" autocorrect="off"
+                 spellcheck="false" placeholder="jsmith"></label>
+        <label class="field grow"><span>Temporary password</span>
+          <input id="proctorPw" type="password" autocapitalize="none"
+                 autocorrect="off" placeholder="they can change it later"></label>
+      </div>
+      <div class="row">
+        <button id="createProctorBtn">Add proctor</button>
+        <button class="ghost" id="cancelProctorBtn">Cancel</button>
+      </div>
+      <p id="proctorNote" style="color:var(--muted);font-size:13px;margin-top:12px"></p>
     </section>
 
     <section>
@@ -505,6 +546,10 @@ async function loadExams() {
 
 function paintOpenButton() {
   const button = $("toggleOpenBtn");
+  // Exit code and Delete act on the selected exam, so they disappear with it.
+  for (const id of ["exitCodeBtn", "deleteExamBtn"]) {
+    $(id).hidden = !currentExam;
+  }
   if (!currentExam) { button.hidden = true; return; }
   button.hidden = false;
   button.textContent = currentExam.is_open ? "Close the door" : "Open the door";
@@ -517,8 +562,14 @@ async function createExam() {
   const title = $("examTitle").value.trim();
   const url = $("examUrl").value.trim();
   const code = $("examCode").value.trim().toUpperCase();
+  const exit = $("examExit").value.trim();
   if (!title || !url || !code) return toast("Title, site and join code are all needed.", true);
   if (!/^https?:\/\//i.test(url)) return toast("The allowed site must start with http:// or https://", true);
+  if (exit && exit.length < 4) return toast("An exit code needs at least 4 characters.", true);
+  if (exit && exit.toUpperCase() === code) {
+    return toast("The exit code must not be the same as the join code — the whole "
+                 + "room knows the join code.", true);
+  }
   try {
     const rows = await call("/rest/v1/exams", {
       method: "POST",
@@ -526,15 +577,115 @@ async function createExam() {
       body: { faculty_id: me.id, title, allowed_url: url, join_code: code, is_open: true },
     });
     currentExam = rows[0];
+    if (exit) { await setExitCode(currentExam.id, exit); }
     $("newExam").hidden = true;
     $("examTitle").value = $("examUrl").value = $("examCode").value = "";
+    $("examExit").value = "";
     await loadExams();
     $("examPick").value = currentExam.id;
-    toast(`Created. Read out the code: ${currentExam.join_code}`);
+    toast(`Created. Read out the join code: ${currentExam.join_code}`);
     refresh();
   } catch (error) {
     // The unique constraint on join_code is the usual cause here.
     toast("Could not create it: " + error.message, true);
+  }
+}
+
+// The code itself never comes back out — set_exit_code stores only a hash — so
+// changing it is always "type a new one", never "here is the old one".
+async function setExitCode(examId, code) {
+  await call("/rest/v1/rpc/set_exit_code", {
+    method: "POST", body: { p_exam: examId, p_code: code },
+  });
+}
+
+async function changeExitCode() {
+  if (!currentExam) return;
+  const code = prompt(
+    `Exit code for "${currentExam.title}".\n\n` +
+    "This is what you type on a student's machine to end their lockdown. It is " +
+    "stored as a hash and never sent to their computer.\n\n" +
+    "At least 4 characters. Leave blank to cancel.");
+  if (!code) return;
+  if (code.trim().length < 4) return toast("An exit code needs at least 4 characters.", true);
+  try {
+    await setExitCode(currentExam.id, code.trim());
+    toast("Exit code set. It applies to every machine running this exam.");
+  } catch (error) { toast("Could not set it: " + error.message, true); }
+}
+
+// Deleting an exam takes its sessions with it by cascade — which means the files
+// have to go FIRST, through the Storage API. Once a session row is gone nothing can
+// authorise deleting the images it owned, and they are unreachable forever.
+async function deleteExam() {
+  if (!currentExam) return;
+  const sessions = await call(
+    `/rest/v1/sessions?select=id&exam_id=eq.${currentExam.id}`) || [];
+  const warning =
+    `Delete "${currentExam.title}" (${currentExam.join_code})?\n\n` +
+    `This also deletes ${sessions.length} student session(s), their ID photos, ` +
+    "their check-in photos and their event history. It cannot be undone.\n\n" +
+    "The recordings on each student's own machine are not touched.";
+  if (!confirm(warning)) return;
+  if (sessions.length && !confirm(
+      `Really delete ${sessions.length} student session(s)? Last chance.`)) return;
+
+  try {
+    for (const s of sessions) { await deleteSessionFiles(s.id); }
+    await call(`/rest/v1/exams?id=eq.${currentExam.id}`, { method: "DELETE" });
+    signedCache.clear();
+    currentExam = null;
+    await loadExams();
+    toast("Exam deleted.");
+    refresh();
+  } catch (error) {
+    toast("Could not delete it: " + error.message
+          + " — nothing was removed, so try again.", true);
+  }
+}
+
+// Registering a proctor is two steps on purpose: signup can only ever create a
+// student (the database trigger sees to that), and promotion is a separate call
+// that only an existing proctor is allowed to make.
+async function createProctor() {
+  const name = $("proctorName").value.trim();
+  const raw = $("proctorId").value.trim();
+  const password = $("proctorPw").value;
+  const note = $("proctorNote");
+  if (!name || !raw || !password) {
+    note.textContent = "Name, ID and a temporary password are all needed.";
+    return;
+  }
+  if (password.length < 6) {
+    note.textContent = "Use at least 6 characters for the password.";
+    return;
+  }
+  const email = raw.includes("@") ? raw.toLowerCase()
+                                  : `${raw}@${ID_EMAIL_DOMAIN}`.toLowerCase();
+  const campusId = raw.includes("@") ? email.split("@")[0] : raw;
+  $("createProctorBtn").disabled = true;
+  note.textContent = "Creating " + email + "…";
+  try {
+    // Signed up with the anon key, not the current session, so this does not
+    // disturb who is signed in to this tab.
+    await call("/auth/v1/signup", {
+      method: "POST", auth: false,
+      headers: { Authorization: "Bearer " + SUPABASE_ANON_KEY },
+      body: { email, password, data: { full_name: name, campus_id: campusId } },
+    }).catch((error) => {
+      // Already registered is fine — promote the existing account.
+      if (!/already|registered|exists/i.test(error.message)) throw error;
+    });
+    await call("/rest/v1/rpc/promote_to_faculty", {
+      method: "POST", body: { p_email: email },
+    });
+    note.textContent = `${name} can now sign in as a proctor with ${email}.`;
+    $("proctorName").value = $("proctorId").value = $("proctorPw").value = "";
+    toast("Proctor added.");
+  } catch (error) {
+    note.textContent = "Could not add them: " + error.message;
+  } finally {
+    $("createProctorBtn").disabled = false;
   }
 }
 
@@ -906,6 +1057,14 @@ $("newExamBtn").onclick = () => { $("newExam").hidden = !$("newExam").hidden; };
 $("cancelExamBtn").onclick = () => { $("newExam").hidden = true; };
 $("createExamBtn").onclick = createExam;
 $("toggleOpenBtn").onclick = toggleOpen;
+$("exitCodeBtn").onclick = changeExitCode;
+$("deleteExamBtn").onclick = deleteExam;
+$("addProctorBtn").onclick = () => {
+  $("addProctor").hidden = !$("addProctor").hidden;
+  $("proctorNote").textContent = "";
+};
+$("cancelProctorBtn").onclick = () => { $("addProctor").hidden = true; };
+$("createProctorBtn").onclick = createProctor;
 $("examPick").onchange = (e) => {
   currentExam = exams.find((x) => x.id === e.target.value) || null;
   paintOpenButton();

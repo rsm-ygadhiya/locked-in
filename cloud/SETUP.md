@@ -172,8 +172,25 @@ Clearing them returns the machine to standalone mode.
 **Proctor**, a few minutes before:
 
 1. Open the dashboard, sign in.
-2. **New exam** — title, the one site students are allowed, and a short join code.
-3. Read the join code out to the room.
+2. **New exam** — title, the one site students are allowed, a short **join code**,
+   and an **exit code**.
+3. Read the **join code** out to the room. Keep the **exit code** to yourself.
+
+The two codes do different jobs, and mixing them up defeats the point:
+
+| | Who gets it | What it does |
+| --- | --- | --- |
+| **Join code** | the whole room | lets a student request a seat |
+| **Exit code** | proctors only | ends the lockdown on a student's machine |
+
+The exit code is stored only as a hash, and is checked by the server — it is never
+sent to a student's computer, so it cannot be read off their laptop no matter what
+they do to it. Each exam has its own, and changing it takes effect immediately on
+every machine running that exam.
+
+If the network is down when you try to release a machine, the check falls back to
+that machine's local passcode (Faculty → Exam settings → Security). That fallback is
+deliberate: failing closed would leave a student trapped in a locked browser.
 
 **Students**:
 

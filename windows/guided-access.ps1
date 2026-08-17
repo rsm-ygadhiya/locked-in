@@ -13,7 +13,8 @@
     4. Force-quits other visible apps
     5. Opens Chrome in --kiosk mode at the one allowed URL
     6. Relaunches Chrome instantly if closed; you CANNOT quit without the passcode
-    7. The unlock prompt keeps returning until the correct passcode is entered
+    7. The unlock prompt keeps returning until the right code is entered — the
+       exam's own exit code in a proctored exam, or this PC's passcode
     8. On exit: uploads stopped, recordings finalized, policy removed, Chrome closed
 
   The allowed URL, allowed hosts, unlock passcode and recording options all come from
@@ -69,6 +70,7 @@ $ConfigPy   = Find-Helper "lockedin_config.py"
 $RecorderPy = Find-Helper "recorder.py"
 $CheckinPy  = Find-Helper "student_session.py"
 $UploaderPy = Find-Helper "uploader.py"
+$CloudPy    = Find-Helper "lockedin_cloud.py"
 
 # uv reads the dependency block inside recorder.py and installs on first run, so it is
 # much the better runner; a plain python works if the packages are already installed.
@@ -149,6 +151,7 @@ if (-not $AllowedUrl -or $AllowHosts.Count -eq 0) {
 $SessionDir  = Join-Path $RecordDir (Get-Date -Format "yyyyMMdd-HHmmss")
 $Proctored   = $false
 $LiveSession = ""
+$LiveExam    = ""
 
 & $PyExe @($PyArgs + @($ConfigPy, "cloud-enabled")) 2>$null | Out-Null
 if ($LASTEXITCODE -eq 0) {
@@ -181,6 +184,7 @@ if ($LASTEXITCODE -eq 0) {
     }
     $handoff = Get-Content $handoffPath -Raw | ConvertFrom-Json
     $LiveSession = [string]$handoff.session_id
+    $LiveExam    = [string]$handoff.exam_id
     if (-not $LiveSession -or -not $handoff.allowed_url) {
         [System.Windows.Forms.MessageBox]::Show(
             "The approval file was unreadable. Not starting the exam.",
@@ -363,6 +367,33 @@ function Remove-Token {
 # ---------- Passcode check ----------
 # The typed entry goes to the verifier on stdin - never as an argument, which would be
 # visible to every other process - and the exit code is the answer.
+# In a proctored exam the exam has its own exit code, checked by the server so the
+# code itself never reaches the student's PC. An unreachable server falls through to
+# the machine's local passcode rather than trapping a student in a locked browser.
+function Test-ExitCode([string]$entry) {
+    if ($Proctored -and $CloudPy -and $LiveExam) {
+        $tokenFile = Join-Path $SessionDir "token.json"
+        if (Test-Path $tokenFile) {
+            $psi = New-Object System.Diagnostics.ProcessStartInfo
+            $psi.FileName = $PyExe
+            $psi.Arguments = Quote-Args ($PyArgs + @($CloudPy, "verify-exit", $LiveExam, $tokenFile))
+            $psi.RedirectStandardInput = $true
+            $psi.RedirectStandardOutput = $true
+            $psi.RedirectStandardError = $true
+            $psi.UseShellExecute = $false
+            $psi.CreateNoWindow = $true
+            $proc = [System.Diagnostics.Process]::Start($psi)
+            $proc.StandardInput.Write($entry)
+            $proc.StandardInput.Close()
+            $proc.WaitForExit()
+            if ($proc.ExitCode -eq 0) { return $true }
+            if ($proc.ExitCode -eq 1) { return $false }
+            # exit 2 = could not ask; fall through to the local passcode below.
+        }
+    }
+    return (Test-Passcode $entry)
+}
+
 function Test-Passcode([string]$entry) {
     if (-not $entry) { return $false }
     $psi = New-Object System.Diagnostics.ProcessStartInfo
@@ -471,7 +502,7 @@ try {
             # Chrome closed -> relaunch immediately, then DEMAND the passcode.
             Launch-Chrome-Kiosk
             Start-Sleep -Seconds 1
-            do { $entry = Show-PasscodePrompt } until (Test-Passcode $entry)
+            do { $entry = Show-PasscodePrompt } until (Test-ExitCode $entry)
             break   # correct passcode -> leave the loop and clean up
         }
         else {

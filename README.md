@@ -47,6 +47,8 @@ And in proctored mode:
 | **Stale detection** | A student whose app stops checking in turns red rather than showing a frozen image |
 | **Event timeline** | Per-student log of check-in, start, blocked sites and exit |
 | **Students can't self-admit** | Enforced by a database trigger, not by the app asking nicely |
+| **Per-exam exit code** | A code only proctors know ends the lockdown; checked server-side, so it never reaches the student's machine |
+| **Proctors add proctors** | From the dashboard; a student cannot promote themselves |
 
 ---
 
