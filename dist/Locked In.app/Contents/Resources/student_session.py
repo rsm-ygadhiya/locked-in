@@ -65,7 +65,12 @@ MUTED = "#7fe0a0"
 DANGER = "#f87171"
 
 POLL_SECONDS = 3.0          # how often the approval screen asks the server
-PREVIEW_MS = 40             # webcam preview refresh, about 25fps
+# Preview refresh and size. Every frame costs a PNG encode (see to_photo), so this is
+# deliberately 15fps at 560px rather than a full-rate viewfinder — it is there to
+# help someone line up a card, and CPU spent here is CPU taken from the machine
+# that is about to record an exam.
+PREVIEW_MS = 66
+PREVIEW_WIDTH = 560
 
 
 def now_iso() -> str:
@@ -111,13 +116,19 @@ def entry(parent: tk.Misc, *, show: str = "") -> tk.Entry:
 
 def to_photo(frame) -> tk.PhotoImage:
     """
-    A BGR OpenCV frame as something Tk can draw.
+    A BGR OpenCV frame as something Tk can draw, without depending on Pillow.
 
-    Tk's PhotoImage reads PPM natively, so encoding to PPM and handing over the
-    base64 avoids depending on Pillow just to show a preview.
+    PNG, specifically. PhotoImage's `data` option accepts only PNG and GIF — PPM
+    works from a *file* but not from base64, which is a trap worth naming: passing
+    PPM bytes here raises "data stream does not have a PNG signature" and the
+    preview silently never appears.
+
+    PNG costs real time (tens of ms at full size), which is why the callers keep the
+    preview small and the refresh modest rather than pushing 25fps.
     """
     import cv2
-    ok, buffer = cv2.imencode(".ppm", frame)
+    ok, buffer = cv2.imencode(".png", frame,
+                              [int(cv2.IMWRITE_PNG_COMPRESSION), 1])
     if not ok:
         raise RuntimeError("could not encode the preview frame")
     return tk.PhotoImage(data=base64.b64encode(buffer.tobytes()))
@@ -142,6 +153,14 @@ class Webcam:
         self.error: str | None = None
 
     def open(self) -> bool:
+        """
+        True once a camera is delivering frames; otherwise self.error says why.
+
+        Everything in here is wrapped, because the caller turns a False into an
+        explanation on screen. An exception escaping instead would leave the student
+        looking at a half-drawn capture screen with no button and no message, which
+        is the worst possible outcome five minutes before an exam.
+        """
         if self.capture is not None:
             return True
         try:
@@ -150,14 +169,28 @@ class Webcam:
             self.error = f"recorder.py is missing next to this script ({exc})"
             return False
 
-        access = recorder.macos_camera_access()
-        if access in ("denied", "restricted"):
-            self.error = ("Camera access is " + access + ". Grant Camera access to "
-                          "Terminal in System Settings > Privacy & Security > Camera, "
-                          "then start again.")
+        try:
+            access = recorder.macos_camera_access()
+            if access in ("denied", "restricted"):
+                self.error = ("Camera access is " + access + ". Grant Camera access "
+                              "to Terminal in System Settings > Privacy & Security > "
+                              "Camera, then start again.")
+                return False
+
+            capture, first = recorder.open_camera(self.index)
+        except ImportError as exc:
+            # OpenCV missing entirely — a plain python3 rather than uv. Worth its own
+            # message, because "no camera" would send someone hunting the wrong fault.
+            self.error = (
+                f"The camera library is not installed ({exc}).\n\n"
+                "Start Locked In with uv, which installs it automatically:\n"
+                "    uv run --script student_session.py\n\n"
+                "Or install it yourself:  pip3 install opencv-python")
+            return False
+        except Exception as exc:                  # noqa: BLE001 - reported on screen
+            self.error = f"The camera could not be opened: {exc}"
             return False
 
-        capture, first = recorder.open_camera(self.index)
         if capture is None:
             self.error = ("No camera delivered a picture. Close any app that might be "
                           "using it (Zoom, Photo Booth, FaceTime) and try again.")
@@ -499,25 +532,37 @@ class CheckIn(tk.Tk):
         row = tk.Frame(self.body, bg=BG)
         row.pack(fill="x", pady=(18, 0))
 
-        state = {"frozen": None, "running": True}
+        state = {"frozen": None, "running": True, "warned": False}
+
+        def render(frame) -> None:
+            """Draw one frame into the preview, scaled and mirrored as appropriate."""
+            import cv2
+            # Mirror the selfie: an unmirrored view of yourself is disorienting to
+            # line your face up in. The ID is left alone so its text stays readable.
+            shown = frame if is_id else cv2.flip(frame, 1)
+            height, width = shown.shape[:2]
+            scale = min(1.0, PREVIEW_WIDTH / width)
+            if scale < 1.0:
+                shown = cv2.resize(shown, (int(width * scale), int(height * scale)),
+                                   interpolation=cv2.INTER_AREA)
+            photo = to_photo(shown)
+            view.configure(image=photo)
+            view.image = photo              # keep a reference or Tk drops it
 
         def tick() -> None:
             if not state["running"] or state["frozen"] is not None:
                 return
             frame = self.webcam.read()
             if frame is not None:
-                import cv2
-                # Mirror the preview: an unmirrored view of yourself is disorienting
-                # to hold a card up to.
-                shown = cv2.flip(frame, 1) if not is_id else frame
-                height, width = shown.shape[:2]
-                scale = min(1.0, 720 / width)
-                if scale < 1.0:
-                    shown = cv2.resize(shown, (int(width * scale), int(height * scale)),
-                                       interpolation=cv2.INTER_AREA)
-                photo = to_photo(shown)
-                view.configure(image=photo)
-                view.image = photo          # keep a reference or Tk drops it
+                try:
+                    render(frame)
+                except Exception as exc:      # noqa: BLE001 - preview is not the job
+                    # A preview that cannot draw must not stop someone taking the
+                    # photo: the capture path does not depend on it. Say so once.
+                    if not state["warned"]:
+                        state["warned"] = True
+                        self.say(f"The preview cannot be shown ({exc}). You can still "
+                                 "take the photo.", bad=True)
             self.after(PREVIEW_MS, tick)
 
         def capture() -> None:
@@ -526,16 +571,12 @@ class CheckIn(tk.Tk):
                 self.say("The camera did not return a picture. Try again.", bad=True)
                 return
             state["frozen"] = frame.copy()
-            import cv2
-            shown = cv2.flip(frame, 1) if not is_id else frame
-            height, width = shown.shape[:2]
-            scale = min(1.0, 720 / width)
-            if scale < 1.0:
-                shown = cv2.resize(shown, (int(width * scale), int(height * scale)),
-                                   interpolation=cv2.INTER_AREA)
-            photo = to_photo(shown)
-            view.configure(image=photo)
-            view.image = photo
+            try:
+                render(frame)
+            except Exception:                 # noqa: BLE001 - same as above
+                pass
+            # Outside the try: the buttons have to swap over even if the still could
+            # not be drawn, or the screen becomes a dead end with no way forward.
             take.pack_forget()
             retake.pack(side="left")
             accept.pack(side="left", padx=(12, 0))

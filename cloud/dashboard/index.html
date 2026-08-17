@@ -341,6 +341,11 @@ function toast(message, bad = false) {
   box._t = setTimeout(() => (box.className = ""), bad ? 6000 : 3000);
 }
 
+function secondsSince(iso) {
+  if (!iso) return Infinity;
+  return (Date.now() - new Date(iso).getTime()) / 1000;
+}
+
 function ago(iso) {
   if (!iso) return "never";
   const ms = Date.now() - new Date(iso).getTime();
@@ -566,6 +571,15 @@ async function paintQueue(sessions) {
 
   for (const session of waiting) {
     const profile = session.profiles || {};
+    // A session row is created before its photos are uploaded — it has to be, since
+    // the storage policies authorise an upload by looking up the session named in
+    // the path. So a student appears here for a second or two with nothing to look
+    // at, and approving them then would mean admitting someone sight unseen.
+    // Approve stays disabled until both photos and the consent record have landed.
+    const ready = Boolean(session.id_photo_path && session.selfie_path
+                          && session.consent_at);
+    const waitingOnUpload = !ready && secondsSince(session.requested_at) < 120;
+
     const [idUrl, selfieUrl] = await Promise.all([
       signedUrl("identity", session.id_photo_path),
       signedUrl("identity", session.selfie_path),
@@ -584,13 +598,17 @@ async function paintQueue(sessions) {
         <div class="sub">${escapeHtml(profile.campus_id || "no ID on file")}</div>
         <div class="sub">${escapeHtml(session.machine || "unknown machine")}</div>
         <div class="sub">asked ${ago(session.requested_at)}</div>
-        ${session.consent_at ? "" :
-          `<div class="flag warn">did not record consent</div>`}
-        ${session.id_photo_path && session.selfie_path ? "" :
-          `<div class="flag warn">photos missing</div>`}
+        ${waitingOnUpload
+          ? `<div class="flag warn">still checking in — waiting for photos</div>` : ""}
+        ${!waitingOnUpload && !session.consent_at
+          ? `<div class="flag warn">did not record consent</div>` : ""}
+        ${!waitingOnUpload && !(session.id_photo_path && session.selfie_path)
+          ? `<div class="flag warn">photos never arrived</div>` : ""}
       </div>
       <div class="acts">
-        <button class="small" onclick="decide('${session.id}', true)">Approve</button>
+        <button class="small" ${ready ? "" : "disabled"}
+          title="${ready ? "" : "Both photos and the consent record must arrive first"}"
+          onclick="decide('${session.id}', true)">Approve</button>
         <button class="small bad" onclick="decide('${session.id}', false)">Refuse</button>
       </div>`;
     queue.appendChild(card);

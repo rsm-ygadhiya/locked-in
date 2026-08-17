@@ -301,12 +301,29 @@ class Cloud:
         )
         if not isinstance(data, dict):
             raise CloudError("the server did not accept that registration")
+
         if not data.get("access_token"):
-            # Happens when email confirmation is still switched on in the project.
+            # Two very different situations produce this identical response, and
+            # Supabase makes them identical on purpose so that signup cannot be used
+            # to discover which addresses are already registered:
+            #   * the account already exists
+            #   * the account is new but the project requires email confirmation
+            #
+            # Trying to sign in separates them, and in the first case it is also the
+            # thing the student wanted anyway — so a returning student who hits
+            # "create an account" out of habit just gets signed in.
+            try:
+                return self.sign_in(identifier, password)
+            except CloudError:
+                pass
             raise CloudError(
-                "the account was created but not signed in — turn off "
-                "'Confirm email' in Supabase > Authentication > Providers > Email"
+                "That could not be signed in. Either this ID is already registered "
+                "with a different password — go back and sign in instead — or this "
+                "project still has 'Confirm email' switched on, which your proctor "
+                "needs to turn off in Supabase > Authentication > Sign In / "
+                "Providers > Email."
             )
+
         self._adopt(data, email)
         self._load_profile()
         return self.session          # type: ignore[return-value]

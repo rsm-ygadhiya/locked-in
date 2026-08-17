@@ -59,6 +59,13 @@ chmod +x "$APP/Contents/MacOS/LockedIn" "$APP/Contents/Resources/guided-access.c
 # ---------- ad-hoc sign ----------
 # No paid Developer ID here, so this is an ad-hoc signature. Gatekeeper will still
 # ask for right-click -> Open the first time on another Mac.
+#
+# Strip extended attributes first. Launching the app, or copying it through Finder
+# or a cloud folder, leaves quarantine flags and Finder metadata behind, and
+# codesign refuses those outright: "resource fork, Finder information, or similar
+# detritus not allowed". Without this, the build works once and then fails for
+# everyone who has actually run the thing.
+xattr -cr "$APP"
 echo "==> ad-hoc signing"
 codesign --force --deep --sign - "$APP"
 codesign -dv "$APP" 2>&1 | head -4
