@@ -2,28 +2,38 @@
   guided-access.ps1  —  a Chrome "Guided Access" / single-site lockdown for Windows
 
   Local focus/kiosk tool (Windows version of guided-access.command). It:
-    1. Locks Chrome via registry policy: incognito OFF, DevTools OFF, only allowed sites
-    2. Force-quits other visible apps
-    3. Opens Chrome in --kiosk mode at the one allowed URL
-    4. Relaunches Chrome instantly if closed; you CANNOT quit without the passcode
-    5. The unlock prompt keeps returning until the correct passcode is entered
-    6. On exit: policy removed, Chrome closed
+    1. Shows the recording notice and waits for the student to agree (nothing below
+       this point happens if they decline)
+    2. Starts recording the screen, the webcam and the microphone (recorder.py)
+    3. Locks Chrome via registry policy: incognito OFF, DevTools OFF, only allowed sites
+    4. Force-quits other visible apps
+    5. Opens Chrome in --kiosk mode at the one allowed URL
+    6. Relaunches Chrome instantly if closed; you CANNOT quit without the passcode
+    7. The unlock prompt keeps returning until the correct passcode is entered
+    8. On exit: recordings finalized, policy removed, Chrome closed
+
+  The allowed URL, allowed hosts, unlock passcode and recording options all come from
+  the settings file, which is written by the admin panel (the "Admin" button on the
+  launcher, or: uv run --script admin_panel.py). The passcode is stored only as a
+  PBKDF2 hash, so it is not sitting in plain text in this script any more.
 
   NOTE: This is a "soft" lockdown for focus/self-control, NOT a secure exam browser.
   Task Manager, a reboot, Win+Tab, or a second device can still defeat it. Needs
   Administrator rights (for the Chrome registry policy) — the script self-elevates.
+
+  Needs Python, for the settings and the recorder. Easiest is uv:
+      winget install --id=astral-sh.uv -e
 
   Run it:  right-click the file  ->  "Run with PowerShell"
   (or from an elevated PowerShell:  powershell -ExecutionPolicy Bypass -File .\guided-access.ps1)
 #>
 
 # ===================== CONFIG =====================
-$AllowedUrl      = "https://rsm-django-02.ucsd.edu/video-exam/station/"
-# Hosts allowed to load (target site + UCSD SSO + Duo 2FA so login works):
-$AllowHosts      = @("rsm-django-02.ucsd.edu", "ucsd.edu", "duosecurity.com")
-# Fixed unlock passcode — change this. Stored in PLAIN TEXT here (fine for
-# self-control, not a real secret).
-$UnlockPasscode  = "letmeout"
+# Where session recordings are written (one dated folder per session).
+$RecordDir = Join-Path ([Environment]::GetFolderPath("Desktop")) "LockedIn-Recordings"
+# Set to $false to start recording without asking. Only do that where the students
+# have already been told, in writing, that the session is recorded.
+$RequireConsent = $true
 # =================================================
 
 # ---------- Self-elevate to Administrator ----------
@@ -35,6 +45,87 @@ if (-not $curr.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator))
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
+
+$ScriptDir = Split-Path -Parent $PSCommandPath
+
+# ---------- Locate the Python helpers and a runner ----------
+# In the repo the .py files sit at the top level, one directory up from windows/;
+# alongside the script is also supported, for a flattened copy on a USB stick.
+function Find-Helper([string]$name) {
+    foreach ($candidate in @((Join-Path $ScriptDir $name), (Join-Path (Split-Path -Parent $ScriptDir) $name))) {
+        if (Test-Path $candidate) { return $candidate }
+    }
+    return $null
+}
+$ConfigPy   = Find-Helper "lockedin_config.py"
+$RecorderPy = Find-Helper "recorder.py"
+
+# uv reads the dependency block inside recorder.py and installs on first run, so it is
+# much the better runner; a plain python works if the packages are already installed.
+$PyExe = $null
+$PyArgs = @()
+$uv = Get-Command uv -ErrorAction SilentlyContinue
+if ($uv) {
+    $PyExe = $uv.Source
+    $PyArgs = @("run", "--script")
+} else {
+    foreach ($candidate in @("$env:LOCALAPPDATA\Programs\uv\uv.exe", "$env:USERPROFILE\.local\bin\uv.exe")) {
+        if (Test-Path $candidate) { $PyExe = $candidate; $PyArgs = @("run", "--script"); break }
+    }
+}
+if (-not $PyExe) {
+    foreach ($name in @("python", "py")) {
+        $found = Get-Command $name -ErrorAction SilentlyContinue
+        if ($found) { $PyExe = $found.Source; break }
+    }
+}
+
+# Every argument gets quoted: these are full paths and any of them may contain spaces.
+function Quote-Args([string[]]$items) {
+    ($items | ForEach-Object { '"' + $_ + '"' }) -join ' '
+}
+
+# ---------- Read the settings ----------
+# The settings file holds the passcode hash, so there is no safe way to carry on
+# without it — better to stop with an explanation than to run a session nobody can
+# unlock.
+if (-not $ConfigPy -or -not $PyExe) {
+    $message = if (-not $PyExe) {
+        "Locked In needs Python. Install uv, then run this again:`r`n`r`n    winget install --id=astral-sh.uv -e"
+    } else {
+        "lockedin_config.py was not found next to this script."
+    }
+    [System.Windows.Forms.MessageBox]::Show($message, "Locked In", "OK", "Error") | Out-Null
+    exit 1
+}
+
+# Reading settings goes through the call operator with a splatted argument array, so
+# PowerShell passes each path as one argument no matter what it contains.
+function Invoke-Py([string[]]$cmdArgs) {
+    $all = $PyArgs + $cmdArgs
+    & $PyExe @all 2>$null
+}
+
+& $PyExe @($PyArgs + @($ConfigPy, "init")) 2>$null | Out-Null
+$AllowedUrl = (Invoke-Py @($ConfigPy, "get-url") | Select-Object -First 1)
+$AllowHosts = @(Invoke-Py @($ConfigPy, "get-hosts") | Where-Object { $_ -and $_.Trim() })
+$recFlags   = (Invoke-Py @($ConfigPy, "get-recording") | Select-Object -First 1)
+$RecScreen = $true; $RecCamera = $true; $RecAudio = $true
+if ($recFlags) {
+    $parts = $recFlags.Trim() -split '\s+'
+    if ($parts.Count -ge 3) {
+        $RecScreen = $parts[0] -eq "true"
+        $RecCamera = $parts[1] -eq "true"
+        $RecAudio  = $parts[2] -eq "true"
+    }
+}
+
+if (-not $AllowedUrl -or $AllowHosts.Count -eq 0) {
+    [System.Windows.Forms.MessageBox]::Show(
+        "Could not read the Locked In settings.`r`n`r`nOpen the admin panel and check the allowed URL and hosts.",
+        "Locked In", "OK", "Error") | Out-Null
+    exit 1
+}
 
 # ---------- Locate Chrome ----------
 $chromeCandidates = @(
@@ -77,6 +168,99 @@ function Remove-Policy {
     Remove-ItemProperty -Path $PolicyBase -Name "DeveloperToolsAvailability" -ErrorAction SilentlyContinue
 }
 
+# ---------- Recording ----------
+$SessionDir = Join-Path $RecordDir (Get-Date -Format "yyyyMMdd-HHmmss")
+$RecProc = $null
+
+function Start-Recording {
+    if (-not ($RecScreen -or $RecCamera -or $RecAudio)) { return }
+
+    if ($RequireConsent) {
+        $streams = @()
+        if ($RecScreen) { $streams += "  -  everything on your screen" }
+        if ($RecCamera) { $streams += "  -  your webcam" }
+        if ($RecAudio)  { $streams += "  -  your microphone" }
+        $notice = "This session will be RECORDED.`r`n`r`n" +
+                  "The following are captured for the whole session:`r`n" +
+                  ($streams -join "`r`n") + "`r`n`r`n" +
+                  "Recordings are saved on this PC, in:`r`n$SessionDir`r`n`r`n" +
+                  "Recording starts when you click Yes and stops when the session ends. " +
+                  "If you do not agree, click No - nothing is recorded and nothing on this PC is changed."
+        $answer = [System.Windows.Forms.MessageBox]::Show(
+            $notice, "Locked In - recording notice", "YesNo", "Warning")
+        if ($answer -ne [System.Windows.Forms.DialogResult]::Yes) {
+            [System.Windows.Forms.MessageBox]::Show(
+                "Declined - nothing was recorded and nothing was changed.", "Locked In") | Out-Null
+            exit 0
+        }
+    }
+
+    if (-not $RecorderPy) {
+        [System.Windows.Forms.MessageBox]::Show(
+            "recorder.py was not found - continuing WITHOUT recording.", "Locked In", "OK", "Warning") | Out-Null
+        return
+    }
+
+    New-Item -ItemType Directory -Path $SessionDir -Force | Out-Null
+    $recArgs = @($RecorderPy, "--out-dir", $SessionDir)
+    if (-not $RecScreen) { $recArgs += "--no-screen" }
+    if (-not $RecCamera) { $recArgs += "--no-camera" }
+    if (-not $RecAudio)  { $recArgs += "--no-audio" }
+
+    $script:RecProc = Start-Process -FilePath $PyExe `
+        -ArgumentList (Quote-Args ($PyArgs + $recArgs)) `
+        -PassThru -WindowStyle Hidden `
+        -RedirectStandardOutput (Join-Path $SessionDir "recorder.log") `
+        -RedirectStandardError  (Join-Path $SessionDir "recorder.err")
+
+    # Give it a moment to fall over loudly (no camera, permission denied) rather than
+    # silently recording nothing for the whole exam.
+    Start-Sleep -Seconds 3
+    if ($script:RecProc.HasExited) {
+        $detail = Get-Content (Join-Path $SessionDir "recorder.err") -Tail 5 -ErrorAction SilentlyContinue
+        $script:RecProc = $null
+        [System.Windows.Forms.MessageBox]::Show(
+            "The recorder could not start, so this session is NOT being recorded.`r`n`r`n" +
+            "Check Camera and Microphone access for desktop apps in Settings > Privacy.`r`n`r`n" +
+            ($detail -join "`r`n"), "Locked In", "OK", "Error") | Out-Null
+    }
+}
+
+function Stop-Recording {
+    if (-not $script:RecProc) { return }
+    # The STOP sentinel is the graceful route: PowerShell has no clean way to raise
+    # SIGINT in another process, and a hard Kill would truncate the video files.
+    New-Item -ItemType File -Path (Join-Path $SessionDir "STOP") -Force | Out-Null
+    if (-not $script:RecProc.WaitForExit(20000)) {
+        try { $script:RecProc.Kill() } catch {}
+    }
+    $script:RecProc = $null
+}
+
+# ---------- Passcode check ----------
+# The typed entry goes to the verifier on stdin - never as an argument, which would be
+# visible to every other process - and the exit code is the answer.
+function Test-Passcode([string]$entry) {
+    if (-not $entry) { return $false }
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $PyExe
+    $psi.Arguments = Quote-Args ($PyArgs + @($ConfigPy, "verify-passcode"))
+    $psi.UseShellExecute = $false
+    $psi.RedirectStandardInput = $true
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.CreateNoWindow = $true
+    try {
+        $proc = [System.Diagnostics.Process]::Start($psi)
+        $proc.StandardInput.Write($entry)
+        $proc.StandardInput.Close()
+        $proc.WaitForExit()
+        return ($proc.ExitCode -eq 0)
+    } catch {
+        return $false
+    }
+}
+
 # ---------- Keep Chrome in front / hide others ----------
 Add-Type @"
 using System;
@@ -87,11 +271,12 @@ public class Win {
 }
 "@
 
-# Processes we never kill (system + the script host + Chrome itself)
+# Processes we never kill (system + the script host + Chrome + the recorder itself)
 $KeepProcs = @("chrome","explorer","powershell","pwsh","WindowsTerminal","conhost",
                "ApplicationFrameHost","SystemSettings","TextInputHost","dwm","csrss",
                "winlogon","fontdrvhost","sihost","ctfmon","StartMenuExperienceHost",
-               "SearchHost","LockApp","ShellExperienceHost")
+               "SearchHost","LockApp","ShellExperienceHost",
+               "python","pythonw","py","uv")
 
 function Kill-OtherWindows {
     Get-Process | Where-Object {
@@ -145,6 +330,9 @@ function Show-PasscodePrompt {
 
 # ================= RUN =================
 try {
+    # Consent and recording come first, so declining leaves the PC untouched.
+    Start-Recording
+
     Apply-Policy
     Get-Process chrome -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 1
@@ -159,7 +347,7 @@ try {
             # Chrome closed -> relaunch immediately, then DEMAND the passcode.
             Launch-Chrome-Kiosk
             Start-Sleep -Seconds 1
-            do { $entry = Show-PasscodePrompt } until ($entry -eq $UnlockPasscode)
+            do { $entry = Show-PasscodePrompt } until (Test-Passcode $entry)
             break   # correct passcode -> leave the loop and clean up
         }
         else {
@@ -170,7 +358,9 @@ try {
     }
 }
 finally {
+    Stop-Recording
     Remove-Policy
     Get-Process chrome -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-    [System.Windows.Forms.MessageBox]::Show("Guided Access ended. Chrome is unlocked again.", "Guided Access") | Out-Null
+    $saved = if (Test-Path $SessionDir) { "`r`n`r`nRecording saved to:`r`n$SessionDir" } else { "" }
+    [System.Windows.Forms.MessageBox]::Show("Guided Access ended. Chrome is unlocked again.$saved", "Guided Access") | Out-Null
 }

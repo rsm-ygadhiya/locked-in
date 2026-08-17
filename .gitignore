@@ -12,6 +12,19 @@ macos/.build/
 **/AppIcon.iconset/
 icon_1024.png
 
-# session recordings the lockdown writes to the Desktop
-guided-access-*.mov
-guided-access-*.mkv
+# session recordings (written to the Desktop, but never commit one if it lands here)
+LockedIn-Recordings/
+*.mov
+*.mkv
+screen.mp4
+camera.mp4
+audio.wav
+
+# python
+__pycache__/
+*.pyc
+.venv/
+
+# the settings file, if anyone points LOCKEDIN_CONFIG at the repo — it holds password
+# hashes, and every machine should generate its own
+config.json

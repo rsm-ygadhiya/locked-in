@@ -26,5 +26,13 @@
 	<string>NSApplication</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<!-- Shown in the macOS permission prompts. The lockdown itself runs from Terminal,
+	     so Terminal is usually what gets asked, but these apply when the app records. -->
+	<key>NSCameraUsageDescription</key>
+	<string>Locked In records your webcam during a locked study or exam session. You are shown a notice and must agree before recording starts.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Locked In records your microphone during a locked study or exam session. You are shown a notice and must agree before recording starts.</string>
+	<key>NSScreenCaptureUsageDescription</key>
+	<string>Locked In records your screen during a locked study or exam session. You are shown a notice and must agree before recording starts.</string>
 </dict>
 </plist>

@@ -8,9 +8,21 @@
 		<data>
 		0pAs286bzcr2L7/GE5aAZ2IOxYs=
 		</data>
+		<key>Resources/admin_panel.py</key>
+		<data>
+		Wz8Tscvi6m1tfXPFqtrpGxK9kzU=
+		</data>
 		<key>Resources/guided-access.command</key>
 		<data>
-		3Fs4TEFbrTWz1c2GmmHqy4H0x2Y=
+		ENgq/nPbyyDkRTeFg5UEai2fWyA=
+		</data>
+		<key>Resources/lockedin_config.py</key>
+		<data>
+		i2isofCcPB99/GPZ7QctJkq4go0=
+		</data>
+		<key>Resources/recorder.py</key>
+		<data>
+		A9IzpYNT7JWICW1HN236J7M1lcc=
 		</data>
 	</dict>
 	<key>files2</key>
@@ -22,11 +34,32 @@
 			/ldcMeENh0v20c0KMEl6MTuhwZb++uWw7wWdpl569Fg=
 			</data>
 		</dict>
+		<key>Resources/admin_panel.py</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			Czy0CCj1aJ/fCl78vTaj+2gPgyxBbfcG17IZbmVNoNg=
+			</data>
+		</dict>
 		<key>Resources/guided-access.command</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			YakRWU0AnupQA2mOsg/lnFCzoSAMpnjS/KX/IvO3nio=
+			xz5C+jVsgdL1Nl1g0B+kPon3lUVkbNmtHWpdtKm83ko=
+			</data>
+		</dict>
+		<key>Resources/lockedin_config.py</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			OUa1XVByXAFds5J/muDzhMaiUE/dG2qQ5lenUOTOqag=
+			</data>
+		</dict>
+		<key>Resources/recorder.py</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			l7VOmgkvPwKPrRIR3iWoUnrErNPVFbD2PLTeu7iVsas=
 			</data>
 		</dict>
 	</dict>

@@ -38,11 +38,15 @@
   .card code { background:rgba(74,222,128,.12); padding:2px 6px; border-radius:5px; color:#9ffcbf; }
   .close { margin-top:16px; padding:10px 20px; border-radius:10px; border:1px solid #4ade80; background:transparent; color:#eafff0; cursor:pointer; font-family:inherit; }
   .close:hover { background:rgba(74,222,128,.15); }
+  .admin { position:absolute; top:16px; right:20px; cursor:pointer; font-size:13px; letter-spacing:1px;
+           color:#7fe0a0; padding:8px 14px; border-radius:10px; border:1px solid rgba(74,222,128,.25); }
+  .admin:hover { color:#eafff0; border-color:#4ade80; }
 </style>
 </head>
 <body>
   <canvas id="matrix"></canvas>
   <div class="veil"></div>
+  <div class="admin" onclick="openAdmin()">&#9881; Admin</div>
 
   <div class="wrap">
     <div class="badge">// study mode engaged</div>
@@ -80,15 +84,64 @@
   }
   function hideMac() { document.getElementById('macOverlay').style.display = 'none'; }
 
+  // The folder this .hta was launched from — everything else is found relative to it.
+  function htaFolder() {
+    var fso = new ActiveXObject('Scripting.FileSystemObject');
+    var htaPath = oHTA.commandLine;
+    if (htaPath.charAt(0) === '"') { htaPath = htaPath.split('"')[1]; }
+    else { htaPath = htaPath.split(' ')[0]; }
+    return fso.GetParentFolderName(htaPath);
+  }
+
+  // In the repo the .py helpers sit one level up from windows/; a flattened copy on a
+  // USB stick puts them right here.
+  function findHelper(name) {
+    var fso = new ActiveXObject('Scripting.FileSystemObject');
+    var folder = htaFolder();
+    var here = folder + '\\' + name;
+    if (fso.FileExists(here)) { return here; }
+    var up = fso.GetParentFolderName(folder) + '\\' + name;
+    if (fso.FileExists(up)) { return up; }
+    return null;
+  }
+
+  function openAdmin() {
+    try {
+      var fso = new ActiveXObject('Scripting.FileSystemObject');
+      var shell = new ActiveXObject('WScript.Shell');
+      var panel = findHelper('admin_panel.py');
+      if (!panel) {
+        alert('admin_panel.py was not found. Keep it in this folder, or in the folder above it.');
+        return;
+      }
+      // uv is preferred because it installs the script dependencies itself. Checking
+      // the usual install paths first, then falling back to whatever is on PATH.
+      var env = shell.Environment('PROCESS');
+      var uvPaths = [env('LOCALAPPDATA') + '\\Programs\\uv\\uv.exe',
+                     env('USERPROFILE') + '\\.local\\bin\\uv.exe'];
+      var cmd = null;
+      for (var i = 0; i < uvPaths.length; i++) {
+        if (fso.FileExists(uvPaths[i])) {
+          cmd = '"' + uvPaths[i] + '" run --script "' + panel + '"';
+          break;
+        }
+      }
+      if (!cmd) {
+        // Try uv on PATH, then python; if both are missing the shell reports it.
+        cmd = 'cmd /c uv run --script "' + panel + '" || python "' + panel + '" || '
+            + 'echo Locked In needs Python. Install uv:  winget install --id=astral-sh.uv -e && pause';
+      }
+      shell.Run(cmd, 1, false);
+    } catch (e) {
+      alert('Could not open the admin panel: ' + e.message);
+    }
+  }
+
   function runWindows() {
     try {
       var shell = new ActiveXObject('WScript.Shell');
       var fso = new ActiveXObject('Scripting.FileSystemObject');
-      var cmd = oHTA.commandLine;
-      var htaPath = cmd;
-      if (htaPath.charAt(0) === '"') { htaPath = htaPath.split('"')[1]; }
-      else { htaPath = htaPath.split(' ')[0]; }
-      var folder = fso.GetParentFolderName(htaPath);
+      var folder = htaFolder();
       var ps1 = folder + '\\guided-access.ps1';
       if (!fso.FileExists(ps1)) { alert('guided-access.ps1 was not found next to this app. Keep both files in the same folder.'); return; }
       shell.Run('powershell -NoProfile -ExecutionPolicy Bypass -File "' + ps1 + '"', 1, false);

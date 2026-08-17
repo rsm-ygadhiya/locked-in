@@ -38,6 +38,58 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
     func userContentController(_ u: WKUserContentController, didReceive m: WKScriptMessage) {
         guard let body = m.body as? String else { return }
         if body == "macos" { launchMac() }
+        if body == "admin" { launchAdmin() }
+    }
+
+    /// Where to find uv (preferred — it installs the script's own dependencies) or a
+    /// plain python3. A double-clicked .app gets no login shell, so PATH is no use
+    /// here and the usual install locations have to be checked directly.
+    static func pythonRunner() -> (exe: String, args: [String])? {
+        let fm = FileManager.default
+        let home = fm.homeDirectoryForCurrentUser.path
+        for uv in ["\(home)/.local/bin/uv", "/opt/homebrew/bin/uv", "/usr/local/bin/uv"] {
+            if fm.isExecutableFile(atPath: uv) { return (uv, ["run", "--script"]) }
+        }
+        for py in ["/opt/homebrew/bin/python3", "/usr/local/bin/python3", "/usr/bin/python3"] {
+            if fm.isExecutableFile(atPath: py) { return (py, []) }
+        }
+        return nil
+    }
+
+    func alert(_ title: String, _ detail: String) {
+        let a = NSAlert()
+        a.messageText = title
+        a.informativeText = detail
+        a.alertStyle = .warning
+        a.runModal()
+    }
+
+    /// Open the settings panel (allowed sites, passcode, recording options).
+    func launchAdmin() {
+        guard let res = Bundle.main.resourcePath else { return }
+        guard let runner = AppDelegate.pythonRunner() else {
+            alert("Locked In needs Python",
+                  "The admin panel runs on Python. Install uv, then try again:\n\n"
+                  + "curl -LsSf https://astral.sh/uv/install.sh | sh")
+            return
+        }
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: runner.exe)
+        p.arguments = runner.args + [res + "/admin_panel.py"]
+        // A panel that dies on startup (no Tk in that interpreter, for instance) would
+        // otherwise just look like a button that does nothing.
+        p.terminationHandler = { proc in
+            guard proc.terminationStatus != 0 else { return }
+            DispatchQueue.main.async {
+                self.alert("The admin panel could not open",
+                           "Exit code \(proc.terminationStatus). If you are using a plain "
+                           + "python3, it may have been built without Tk — installing uv "
+                           + "is the easier fix.")
+            }
+        }
+        do { try p.run() } catch {
+            alert("The admin panel could not open", error.localizedDescription)
+        }
     }
 
     func launchMac() {
@@ -84,11 +136,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
   .card code { background: rgba(74,222,128,.12); padding: 2px 7px; border-radius: 6px; color: #9ffcbf; }
   .close { margin-top: 18px; padding: 12px 22px; border-radius: 12px; border: 1px solid #4ade80; background: transparent; color: #eafff0; font-size: 15px; cursor: pointer; font-family: inherit; }
   .close:hover { background: rgba(74,222,128,.15); }
+  .admin { position: fixed; top: 18px; right: 20px; z-index: 3; cursor: pointer; font-size: 13px;
+           letter-spacing: 1px; color: #7fe0a0; opacity: .6; padding: 8px 14px; border-radius: 10px;
+           border: 1px solid rgba(74,222,128,.25); transition: opacity .15s ease, border-color .2s ease; }
+  .admin:hover { opacity: 1; border-color: #4ade80; }
 </style>
 </head>
 <body>
   <canvas id="matrix"></canvas>
   <div class="veil"></div>
+  <div class="admin" onclick="pick('admin')">&#9881;&#65039; Admin</div>
 
   <div class="wrap">
     <div class="badge">// study mode engaged</div>
@@ -122,7 +179,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
 <script>
   function pick(os) {
     if (os === 'windows') { document.getElementById('winOverlay').style.display = 'flex'; return; }
-    try { window.webkit.messageHandlers.bridge.postMessage('macos'); } catch (e) {}
+    try { window.webkit.messageHandlers.bridge.postMessage(os === 'admin' ? 'admin' : 'macos'); } catch (e) {}
   }
   function hideWin() { document.getElementById('winOverlay').style.display = 'none'; }
 
