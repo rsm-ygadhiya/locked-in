@@ -25,9 +25,9 @@ You need: a Supabase account (free, no card), and the ability to run one SQL scr
 2. Paste the entire contents of [`schema.sql`](schema.sql) and press **Run**.
 3. It should finish with *Success. No rows returned*.
 
-That creates five tables, the Row Level Security policies that decide who can see
-what, two private storage buckets, and the trigger that stops a student from
-approving themselves.
+That creates six tables, the Row Level Security policies that decide who can see
+what, two private storage buckets, the trigger that stops a student from approving
+themselves, and the functions behind exit codes and adding proctors.
 
 Running it a second time is safe — it drops and recreates the policies rather than
 erroring.
@@ -104,8 +104,10 @@ select u.email, p.role, p.full_name from public.profiles p
 join auth.users u on u.id = p.id order by p.created_at desc;
 ```
 
-Repeat for each proctor. Students never need this step — they register themselves
-from the check-in screen and land as students automatically.
+You only have to do this **once**. After the first proctor exists, add the rest from
+the dashboard — **Add proctor** in the header — which creates the account and grants
+the role in one step. Students never need any of this: they register themselves from
+the check-in screen and land as students automatically.
 
 > **If you create an account with SQL instead of the dashboard**, set the token
 > columns to `''` and not `NULL`:
@@ -146,12 +148,13 @@ Then get it in front of a browser. In rough order of effort:
 - **Supabase Storage.** Create a public bucket, upload `index.html`, use its public
   URL.
 
-Whichever you choose, paste the address into the admin panel's **Proctoring** tab as
-the dashboard address — that is what the Faculty button on the launcher opens.
+Whichever you choose, paste the address into **Faculty → Exam settings →
+Proctoring** as the dashboard address — that is what the Faculty button opens.
 
 ## 7. Point the student machines at the project
 
-On each student Mac, open the Locked In launcher → **Admin** → **Proctoring**:
+On each student machine, open the Locked In launcher → **Faculty** → **Exam
+settings** → **Proctoring**. It is the same panel on Windows:
 
 - **Project URL** and **Anon key** from step 4
 - **Dashboard address** from step 6
