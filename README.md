@@ -90,8 +90,10 @@ locked-in/
 ```
 
 The launcher's start screen asks **Student** or **Faculty**. Faculty then offers the
-two halves of a proctor's job — the web dashboard, and the settings for that
-particular Mac — so machine setup is no longer a gear icon a student can wander into.
+two halves of a proctor's job — the web dashboard, and the exam settings — so setup is
+no longer a gear icon a student can wander into. Both launchers show the same two
+choices, and the exam settings are the same settings on either platform: they live in
+one JSON file that both lockdown scripts read.
 There is a smaller "on Windows?" link for the other platform's instructions, so you can copy this whole
 folder to both machines (USB / iCloud / OneDrive) and use whichever applies. The `.py`
 files at the top level are shared by both platforms — keep them next to the platform
@@ -147,11 +149,16 @@ To exit: quit Chrome (⌘Q), then enter the passcode.
 
 ### Windows
 
-1. Keep **`LockedIn.hta`**, **`guided-access.ps1`** and the three `.py` files together
+1. Keep **`LockedIn.hta`**, **`guided-access.ps1`** and the `.py` files together
    (the `.py` files may sit in the folder above, as they do in this repo).
 2. Double-click **`LockedIn.hta`**.
-3. Click **Windows**, agree to the recording notice, then approve the Administrator
-   (UAC) prompt — needed for the Chrome registry policy.
+3. Click **Student**. In proctored mode the check-in opens here, exactly as on a Mac;
+   in standalone mode you get the recording notice instead.
+4. Approve the Administrator (UAC) prompt — needed for the Chrome registry policy.
+
+**Faculty** offers the same two choices as the Mac launcher: the proctor dashboard,
+and the exam settings. Both platforms read and write the same settings file format, so
+an exam configured on one is configured the same way on the other.
 
 Windows asks for camera and microphone access under Settings → Privacy → Camera /
 Microphone; desktop apps must be allowed.
@@ -162,7 +169,7 @@ To exit: close Chrome, then enter the passcode.
 
 ## The admin panel
 
-Choose **Faculty → Settings for this Mac** on the launcher, or run it directly:
+Choose **Faculty → Exam settings** on either launcher, or run it directly:
 
 ```bash
 uv run --script admin_panel.py

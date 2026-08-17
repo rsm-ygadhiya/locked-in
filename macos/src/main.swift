@@ -93,8 +93,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
         }
         alert("No dashboard address set",
               "The proctor dashboard is a web page, and this Mac does not know where "
-              + "it is published yet.\n\nGo back, choose Faculty > Settings for this Mac, "
-              + "and paste its "
+              + "it is published yet.\n\nGo back, choose Faculty > Exam settings, and paste "
+              + "its "
               + "address into the Proctoring section — or open cloud/dashboard/"
               + "index.html directly in a browser.")
     }
@@ -250,8 +250,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
           <div class="pd">Create exams and join codes, approve students, watch the live grid. Opens in your browser.</div>
         </div>
         <div class="pick" onclick="pick('admin')">
-          <div class="pl">&#9881;&#65039;&nbsp; Settings for this Mac</div>
-          <div class="pd">Allowed sites, unlock passcode, what gets recorded, and the Supabase project. Needs the admin password.</div>
+          <div class="pl">&#9881;&#65039;&nbsp; Exam settings</div>
+          <div class="pd">Allowed sites, unlock passcode, what gets recorded, and the Supabase project. Same settings on Mac and Windows. Needs the admin password.</div>
         </div>
       </div>
       <button class="close" onclick="hideFac()">never mind</button>

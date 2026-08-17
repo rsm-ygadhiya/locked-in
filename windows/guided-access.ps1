@@ -2,20 +2,28 @@
   guided-access.ps1  —  a Chrome "Guided Access" / single-site lockdown for Windows
 
   Local focus/kiosk tool (Windows version of guided-access.command). It:
+    0. If this PC is set up for proctored exams, runs the check-in first
+       (student_session.py): sign in, join code, consent, photograph the student ID,
+       then wait for a proctor to approve. Nothing below happens without approval.
     1. Shows the recording notice and waits for the student to agree (nothing below
-       this point happens if they decline)
-    2. Starts recording the screen, the webcam and the microphone (recorder.py)
+       this point happens if they decline; skipped when the check-in already got it)
+    2. Starts recording the screen, the webcam and the microphone (recorder.py), plus
+       the live feed to the proctor's dashboard (uploader.py) in a proctored exam
     3. Locks Chrome via registry policy: incognito OFF, DevTools OFF, only allowed sites
     4. Force-quits other visible apps
     5. Opens Chrome in --kiosk mode at the one allowed URL
     6. Relaunches Chrome instantly if closed; you CANNOT quit without the passcode
     7. The unlock prompt keeps returning until the correct passcode is entered
-    8. On exit: recordings finalized, policy removed, Chrome closed
+    8. On exit: uploads stopped, recordings finalized, policy removed, Chrome closed
 
   The allowed URL, allowed hosts, unlock passcode and recording options all come from
-  the settings file, which is written by the admin panel (the "Admin" button on the
-  launcher, or: uv run --script admin_panel.py). The passcode is stored only as a
-  PBKDF2 hash, so it is not sitting in plain text in this script any more.
+  the settings file, written from the launcher under Faculty > Exam settings (or:
+  uv run --script admin_panel.py). They are the same settings, in the same file
+  format, as on a Mac. The passcode is stored only as a PBKDF2 hash, so it is not
+  sitting in plain text in this script any more.
+
+  In a proctored exam the exam record decides the allowed site, overriding whatever
+  this PC has configured locally.
 
   NOTE: This is a "soft" lockdown for focus/self-control, NOT a secure exam browser.
   Task Manager, a reboot, Win+Tab, or a second device can still defeat it. Needs
@@ -59,6 +67,8 @@ function Find-Helper([string]$name) {
 }
 $ConfigPy   = Find-Helper "lockedin_config.py"
 $RecorderPy = Find-Helper "recorder.py"
+$CheckinPy  = Find-Helper "student_session.py"
+$UploaderPy = Find-Helper "uploader.py"
 
 # uv reads the dependency block inside recorder.py and installs on first run, so it is
 # much the better runner; a plain python works if the packages are already installed.
@@ -122,9 +132,70 @@ if ($recFlags) {
 
 if (-not $AllowedUrl -or $AllowHosts.Count -eq 0) {
     [System.Windows.Forms.MessageBox]::Show(
-        "Could not read the Locked In settings.`r`n`r`nOpen the admin panel and check the allowed URL and hosts.",
+        "Could not read the Locked In settings.`r`n`r`nOpen the launcher, choose Faculty > Exam settings, and check the allowed URL and hosts.",
         "Locked In", "OK", "Error") | Out-Null
     exit 1
+}
+
+# ---------- Proctored check-in ----------
+# The Windows half of the same gate the Mac lockdown runs. With a Supabase project
+# configured, a student cannot reach the lockdown by themselves: student_session.py
+# signs them in, photographs their ID and waits for a proctor. It exits non-zero if
+# that does not happen, and this script stops there - before the registry policy is
+# written, so a student who was not admitted leaves with their PC untouched.
+#
+# With no project configured this whole block is skipped and the lockdown behaves
+# exactly as it always did.
+$SessionDir  = Join-Path $RecordDir (Get-Date -Format "yyyyMMdd-HHmmss")
+$Proctored   = $false
+$LiveSession = ""
+
+& $PyExe @($PyArgs + @($ConfigPy, "cloud-enabled")) 2>$null | Out-Null
+if ($LASTEXITCODE -eq 0) {
+    if (-not $CheckinPy) {
+        [System.Windows.Forms.MessageBox]::Show(
+            "This PC is configured for proctored exams, but student_session.py is missing next to the lockdown script.`r`n`r`n" +
+            "Reinstall Locked In, or clear the Supabase settings under Faculty > Exam settings to run it standalone.",
+            "Locked In", "OK", "Error") | Out-Null
+        exit 1
+    }
+
+    New-Item -ItemType Directory -Path $SessionDir -Force | Out-Null
+    Write-Host "Opening check-in (sign in, photograph your ID, wait for your proctor)..."
+    $checkin = Start-Process -FilePath $PyExe `
+        -ArgumentList (Quote-Args ($PyArgs + @($CheckinPy, "--session-dir", $SessionDir))) `
+        -PassThru -Wait
+    if ($checkin.ExitCode -ne 0) {
+        Write-Host "Check-in was not completed - the exam was not started, and nothing on this PC was changed."
+        # An empty session folder is just clutter on the Desktop.
+        try { Remove-Item $SessionDir -ErrorAction SilentlyContinue } catch {}
+        exit 1
+    }
+
+    $handoffPath = Join-Path $SessionDir "handoff.json"
+    if (-not (Test-Path $handoffPath)) {
+        [System.Windows.Forms.MessageBox]::Show(
+            "Check-in finished but left no approval on disk. Not starting the exam.",
+            "Locked In", "OK", "Error") | Out-Null
+        exit 1
+    }
+    $handoff = Get-Content $handoffPath -Raw | ConvertFrom-Json
+    $LiveSession = [string]$handoff.session_id
+    if (-not $LiveSession -or -not $handoff.allowed_url) {
+        [System.Windows.Forms.MessageBox]::Show(
+            "The approval file was unreadable. Not starting the exam.",
+            "Locked In", "OK", "Error") | Out-Null
+        exit 1
+    }
+
+    # The exam decides the allowed site, not this PC's local settings.
+    $AllowedUrl = [string]$handoff.allowed_url
+    try {
+        $examHost = ([System.Uri]$AllowedUrl).Host
+        if ($examHost) { $AllowHosts += $examHost }
+    } catch {}
+    $Proctored = $true
+    Write-Host "Approved. Session $LiveSession"
 }
 
 # ---------- Locate Chrome ----------
@@ -169,13 +240,17 @@ function Remove-Policy {
 }
 
 # ---------- Recording ----------
-$SessionDir = Join-Path $RecordDir (Get-Date -Format "yyyyMMdd-HHmmss")
+# $SessionDir is set further up, before the check-in, because the check-in writes its
+# approval and token into that same folder.
 $RecProc = $null
+$UploadProc = $null
 
 function Start-Recording {
     if (-not ($RecScreen -or $RecCamera -or $RecAudio)) { return }
 
-    if ($RequireConsent) {
+    # A proctored student already read the consent text and ticked the box during
+    # check-in; asking again in a different dialog just trains people to click through.
+    if ($RequireConsent -and -not $Proctored) {
         $streams = @()
         if ($RecScreen) { $streams += "  -  everything on your screen" }
         if ($RecCamera) { $streams += "  -  your webcam" }
@@ -206,6 +281,9 @@ function Start-Recording {
     if (-not $RecScreen) { $recArgs += "--no-screen" }
     if (-not $RecCamera) { $recArgs += "--no-camera" }
     if (-not $RecAudio)  { $recArgs += "--no-audio" }
+    # In a proctored exam the recorder also keeps two small JPEGs current for
+    # uploader.py to publish to the proctor's dashboard.
+    if ($Proctored)      { $recArgs += "--live-tiles" }
 
     $script:RecProc = Start-Process -FilePath $PyExe `
         -ArgumentList (Quote-Args ($PyArgs + $recArgs)) `
@@ -235,6 +313,51 @@ function Stop-Recording {
         try { $script:RecProc.Kill() } catch {}
     }
     $script:RecProc = $null
+}
+
+# ---------- Live feed to the proctor ----------
+# Separate process from the recorder on purpose: the camera can only be held by one
+# process, and a stalled upload must never cost frames of the exam recording. If this
+# dies the recording carries on and the dashboard just shows the student as stale.
+function Start-Uploading {
+    if (-not $Proctored -or -not $UploaderPy -or -not $script:RecProc) {
+        if ($Proctored -and -not $script:RecProc) {
+            Write-Host "WARNING: nothing is being recorded, so there is no live feed either."
+        }
+        return
+    }
+    $upArgs = @($UploaderPy, "--session-dir", $SessionDir,
+                "--session-id", $LiveSession,
+                "--token-file", (Join-Path $SessionDir "token.json"))
+    $script:UploadProc = Start-Process -FilePath $PyExe `
+        -ArgumentList (Quote-Args ($PyArgs + $upArgs)) `
+        -PassThru -WindowStyle Hidden `
+        -RedirectStandardOutput (Join-Path $SessionDir "uploader.log") `
+        -RedirectStandardError  (Join-Path $SessionDir "uploader.err")
+    Start-Sleep -Seconds 1
+    if ($script:UploadProc.HasExited) {
+        $script:UploadProc = $null
+        Write-Host "WARNING: the live feed to your proctor could not start. The exam is"
+        Write-Host "         still being recorded locally. See uploader.err."
+    } else {
+        Write-Host "Live feed to the proctor: on"
+    }
+}
+
+function Stop-Uploading {
+    if (-not $script:UploadProc) { return }
+    # Killed rather than left to notice the STOP file: the recorder deletes that file
+    # when it finishes, so whichever of the two looks second might never see it.
+    try { $script:UploadProc.Kill() } catch {}
+    try { $script:UploadProc.WaitForExit(5000) | Out-Null } catch {}
+    $script:UploadProc = $null
+}
+
+# The token file is the student's credential for the whole session. uploader.py
+# deletes it as soon as it has read it; this is the safety net for the paths where
+# the uploader never ran.
+function Remove-Token {
+    Remove-Item (Join-Path $SessionDir "token.json") -Force -ErrorAction SilentlyContinue
 }
 
 # ---------- Passcode check ----------
@@ -332,6 +455,7 @@ function Show-PasscodePrompt {
 try {
     # Consent and recording come first, so declining leaves the PC untouched.
     Start-Recording
+    Start-Uploading
 
     Apply-Policy
     Get-Process chrome -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
@@ -358,7 +482,11 @@ try {
     }
 }
 finally {
+    # Uploader first: it needs the live tiles to still exist to publish a last frame,
+    # and it is what marks the session ended for the proctor.
+    Stop-Uploading
     Stop-Recording
+    Remove-Token
     Remove-Policy
     Get-Process chrome -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
     $saved = if (Test-Path $SessionDir) { "`r`n`r`nRecording saved to:`r`n$SessionDir" } else { "" }
