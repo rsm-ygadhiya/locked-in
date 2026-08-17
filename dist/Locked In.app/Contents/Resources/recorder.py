@@ -5,6 +5,7 @@
 #   "mss>=9.0",
 #   "numpy>=1.26",
 #   "sounddevice>=0.4.6",
+#   "pyobjc-framework-AVFoundation>=10.0; sys_platform == 'darwin'",
 # ]
 # ///
 """
@@ -27,7 +28,7 @@ produces 40 minutes of footage that lines up with the .wav and with the real clo
 Run it:
     uv run recorder.py --out-dir ~/Desktop/LockedIn-Recordings/20260817-120000
 uv reads the dependency block above and installs into a cached environment on first
-run. With a plain interpreter, install the four packages yourself and run:
+run. With a plain interpreter, install the packages listed above yourself and run:
     python3 recorder.py --out-dir <dir>
 
 Stopping it, in order of preference:
@@ -164,27 +165,119 @@ def record_screen(out_dir: Path, fps: float, max_width: int) -> None:
             log(f"screen: saved {clock.seconds:.0f}s to screen.mp4")
 
 
+def macos_camera_access() -> str:
+    """
+    Ask macOS for camera access up front, and report where we stand.
+
+    OpenCV never calls AVCaptureDevice.requestAccess — it just tries to open the device
+    — so on a Mac that has never been asked, capture fails silently with no prompt and
+    no explanation. Asking explicitly is what makes the permission dialog appear.
+    """
+    if not IS_MAC:
+        return "n/a"
+    try:
+        import AVFoundation as AVF
+    except ImportError:
+        return "unknown (pyobjc not installed)"
+
+    labels = {0: "not yet asked", 1: "restricted", 2: "denied", 3: "authorized"}
+    status = AVF.AVCaptureDevice.authorizationStatusForMediaType_(AVF.AVMediaTypeVideo)
+
+    if status == 0:
+        granted = threading.Event()
+        answer = {"ok": False}
+
+        def completion(ok):
+            answer["ok"] = bool(ok)
+            granted.set()
+
+        AVF.AVCaptureDevice.requestAccessForMediaType_completionHandler_(
+            AVF.AVMediaTypeVideo, completion)
+        log("camera: waiting for you to allow camera access...")
+        granted.wait(120)
+        return "authorized" if answer["ok"] else "denied"
+
+    return labels.get(status, "unknown")
+
+
+def camera_devices() -> list[str]:
+    """Device names as AVFoundation sees them, for diagnostics on macOS."""
+    if not IS_MAC:
+        return []
+    try:
+        import AVFoundation as AVF
+        return [d.localizedName()
+                for d in AVF.AVCaptureDevice.devicesWithMediaType_(AVF.AVMediaTypeVideo)]
+    except Exception:                             # noqa: BLE001 - diagnostics only
+        return []
+
+
+def open_camera(preferred: int):
+    """
+    Find a camera that actually delivers frames.
+
+    isOpened() is not good enough: a device can report itself open and then never
+    produce a single frame — index 0 under the AVFoundation backend does exactly that
+    on some Macs while index 1 works, and OpenCV's own device enumeration is unreliable
+    there. So every combination is judged on whether a real frame arrives.
+    """
+    import cv2
+
+    if IS_WINDOWS:
+        # DirectShow first: markedly more reliable than MSMF for plain webcams.
+        backends = [(cv2.CAP_DSHOW, "DSHOW"), (cv2.CAP_MSMF, "MSMF")]
+    elif IS_MAC:
+        backends = [(cv2.CAP_AVFOUNDATION, "AVFOUNDATION")]
+    else:
+        backends = [(cv2.CAP_V4L2, "V4L2")]
+    backends.append((cv2.CAP_ANY, "ANY"))
+
+    # The requested index is tried first, on every backend, before scanning the others.
+    indices = [preferred] + [i for i in range(4) if i != preferred]
+
+    for backend, backend_name in backends:
+        for index in indices:
+            camera = cv2.VideoCapture(index, backend)
+            if not camera.isOpened():
+                camera.release()
+                continue
+            camera.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+            camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+            # Cameras routinely need a moment to warm up before the first good frame.
+            for _ in range(10):
+                ok, frame = camera.read()
+                if ok and frame is not None:
+                    log(f"camera: {backend_name} index {index}")
+                    return camera, frame
+                time.sleep(0.2)
+            log(f"camera: {backend_name} index {index} opened but sent no frames — "
+                "trying the next one")
+            camera.release()
+
+    return None, None
+
+
 def record_camera(out_dir: Path, fps: float, index: int) -> None:
     """Capture the webcam until STOP."""
     import cv2
 
-    # DirectShow is markedly more reliable than the default MSMF backend on Windows;
-    # macOS goes through AVFoundation, which is what raises the TCC camera prompt.
-    backend = cv2.CAP_DSHOW if IS_WINDOWS else cv2.CAP_ANY
-    camera = cv2.VideoCapture(index, backend)
-    if not camera.isOpened():
-        log(f"ERROR: no camera at index {index} — is it in use, or permission denied?")
+    access = macos_camera_access()
+    if access in ("denied", "restricted"):
+        log(f"ERROR: camera access {access}. On macOS, grant Camera access to the app "
+            "running this (Terminal, for the lockdown) in System Settings > Privacy & "
+            "Security > Camera, then run it again.")
         return
-    camera.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-    camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
 
-    ok, first = camera.read()
-    if not ok or first is None:
-        log("ERROR: camera opened but returned no frames — check Camera permission")
-        camera.release()
+    camera, first = open_camera(index)
+    if camera is None:
+        devices = camera_devices()
+        seen = f" AVFoundation sees: {', '.join(devices)}." if devices else ""
+        log(f"ERROR: no camera delivered any frames (tried indices 0-3 on every "
+            f"backend; access={access}).{seen} Is another app using the camera?")
         return
+
     size = (first.shape[1] // 2 * 2, first.shape[0] // 2 * 2)
-    log(f"camera: index {index} at {size[0]}x{size[1]} @ {fps:g}fps")
+    log(f"camera: {size[0]}x{size[1]} @ {fps:g}fps")
 
     writer = open_writer(out_dir / "camera.mp4", fps, size)
     if writer is None:
