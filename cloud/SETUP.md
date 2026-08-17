@@ -107,6 +107,23 @@ join auth.users u on u.id = p.id order by p.created_at desc;
 Repeat for each proctor. Students never need this step — they register themselves
 from the check-in screen and land as students automatically.
 
+> **If you create an account with SQL instead of the dashboard**, set the token
+> columns to `''` and not `NULL`:
+>
+> ```sql
+> update auth.users set
+>     confirmation_token = '', recovery_token = '', email_change = '',
+>     email_change_token_new = '', email_change_token_current = '',
+>     phone_change = '', phone_change_token = '', reauthentication_token = ''
+> where email = 'yourid@ucsd.edu';
+> ```
+>
+> GoTrue reads those columns into plain strings, so a `NULL` makes every sign-in
+> for that account fail with a misleading `500 Database error querying schema`.
+> The dashboard's own **Add user** sets them to `''`; hand-written SQL usually
+> forgets. Nothing else about the account looks wrong, which is what makes this
+> one expensive to debug.
+
 ## 6. Publish the dashboard
 
 `dashboard/index.html` is one self-contained file. Open it in an editor and fill in
@@ -204,15 +221,36 @@ still perfectly usable for spotting someone on their phone.
 ## Deleting the data afterwards
 
 ID photos and check-in photos are identity documents belonging to real students.
-`schema.sql` ships a purge function; run it once grades are in:
+Run the purge once grades are in:
 
-```sql
-select public.purge_old_sessions(30);   -- anything older than 30 days
+```bash
+uv run --script cloud/purge.py --days 30 --dry-run   # see what would go
+uv run --script cloud/purge.py --days 30             # actually delete
+uv run --script cloud/purge.py --days 30 --yes       # for a cron job
 ```
 
-That deletes the storage objects and the session rows; frames and events cascade
-with them. If your project has `pg_cron` enabled, schedule it and stop thinking
-about it.
+It signs in as a proctor and only ever touches that account's own exams. No
+`service_role` key involved.
+
+**Why a script and not one line of SQL.** Deletion has a mandatory order, and
+getting it wrong is unrecoverable:
+
+1. delete the **files** through the Storage API
+2. only then delete the **session rows**
+
+Supabase refuses direct `DELETE` on `storage.objects` — removing that row would drop
+the metadata and leave the real file orphaned in the storage backend. And the
+policies that authorise a file deletion work by looking up the session named in the
+file's path. So once the session row is gone, **nobody can ever delete those files
+again** — not the student, not the proctor. They are unreachable with anything short
+of the `service_role` key.
+
+That is not hypothetical; it happened while this was being built. If you already
+have orphans, either use the `service_role` key from the dashboard, or re-insert a
+session row with the orphan's UUID, delete the files, then delete the row again.
+
+`purge.py` enforces the order and refuses to delete any rows if a file deletion
+failed. The dashboard's "Let them try again" button does the same for one student.
 
 Decide the retention period **before** the first exam, tell students what it is, and
 hold to it. That is the part people skip.

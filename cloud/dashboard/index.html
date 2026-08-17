@@ -233,8 +233,8 @@
 // ===========================================================================
 // Configuration — paste your project's values here.
 // ===========================================================================
-const SUPABASE_URL      = "";   // e.g. "https://abcdefgh.supabase.co"
-const SUPABASE_ANON_KEY  = "";   // the "anon public" key, safe to publish
+const SUPABASE_URL      = "https://qmzjmawodnqkrojtxszt.supabase.co";
+const SUPABASE_ANON_KEY  = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFtemptYXdvZG5xa3JvanR4c3p0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY5OTQ1NzksImV4cCI6MjEwMjU3MDU3OX0.1J7EBOvobp0aRGG5MKCBtzw836PR8BIV6uuy-cl-nRQ";
 const ID_EMAIL_DOMAIN    = "ucsd.edu";  // campus ID -> ID@domain, as the app does
 
 // How often the page refreshes. 3s matches the recorder's default tile interval;
@@ -513,12 +513,41 @@ async function decide(sessionId, approve) {
 
 async function resetSession(sessionId) {
   if (!confirm("Delete this student's session so they can check in again?\n\n" +
-               "Their ID photo and check-in photo go with it.")) return;
+               "Their ID photo and check-in photo are deleted too.")) return;
   try {
+    // Files first, and through the Storage API rather than the database: deleting
+    // the row in storage.objects would only drop the metadata and strand the real
+    // file. Nothing in the database can do this, so it has to happen here — and if
+    // the row went first, nothing would be able to find these paths again.
+    await deleteSessionFiles(sessionId);
     await call(`/rest/v1/sessions?id=eq.${sessionId}`, { method: "DELETE" });
+    signedCache.clear();
     toast("Reset. They can run the check-in again.");
     refresh();
   } catch (error) { toast(error.message, true); }
+}
+
+// The four objects a session can own. Missing ones are fine — the point is that
+// they are gone, and a student who never got as far as a selfie has none.
+async function deleteSessionFiles(sessionId) {
+  const targets = [
+    ["identity", "id.jpg"], ["identity", "selfie.jpg"],
+    ["live", "screen.jpg"], ["live", "camera.jpg"],
+  ];
+  const results = await Promise.all(targets.map(async ([bucket, file]) => {
+    try {
+      await call(`/storage/v1/object/${bucket}/${sessionId}/${file}`,
+                 { method: "DELETE" });
+      return true;
+    } catch (error) {
+      if (/not.?found|404/i.test(error.message)) return true;   // already gone
+      return false;
+    }
+  }));
+  if (results.some((done) => !done)) {
+    throw new Error("some of the student's files could not be deleted, so the " +
+                    "session was kept — try again");
+  }
 }
 
 function nameOf(session) {

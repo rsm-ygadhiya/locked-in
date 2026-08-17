@@ -64,6 +64,7 @@ locked-in/
 ├── cloud/
 │   ├── SETUP.md              how to stand the backend up on a free Supabase project
 │   ├── schema.sql            tables, RLS policies, storage buckets, purge function
+│   ├── purge.py              retention: delete old sessions and their photos
 │   ├── dashboard/
 │   │   └── index.html        the faculty dashboard — one self-contained page
 │   └── test/
@@ -318,8 +319,10 @@ you:
   material than the videos do: a photograph of each student's ID card, a photograph
   of their face, and rolling thumbnails of their screen. That data lives in your
   Supabase project, and deciding where it may live, who can read it, and when it is
-  purged is now your obligation rather than a hypothetical. `schema.sql` ships a
-  `purge_old_sessions()` function; nothing calls it for you.
+  purged is now your obligation rather than a hypothetical. `cloud/purge.py` does the
+  deleting; nothing runs it for you. Note also that deletion has a mandatory order —
+  files through the Storage API *first*, rows second — because a file whose session
+  row is gone can no longer be deleted by anyone. See SETUP.md.
 - Who can access them? The local files land on the Desktop, readable by the student
   and anyone else on that account. The uploaded material is readable by the student it
   belongs to and by the proctor who owns that exam, enforced by database policies —

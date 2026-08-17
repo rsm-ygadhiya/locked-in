@@ -319,6 +319,41 @@ create trigger guard_session_update
 
 
 -- ---------------------------------------------------------------------------
+-- Files are NOT deleted by deleting a session
+--
+-- Worth stating plainly, because it is the one place where the obvious thing does
+-- not work. storage.objects cannot carry a foreign key to sessions, and a trigger
+-- that deletes from it does not work either: Supabase guards that table with
+-- storage.protect_delete(), so the delete raises and takes the whole session
+-- delete down with it.
+--
+-- The guard is right. Removing a row from storage.objects only drops the metadata
+-- — the actual file stays in the storage backend, orphaned where nothing can find
+-- it. Deletion has to go through the Storage API, which removes both.
+--
+-- So it is the client's job, and the delete policies further down are what let it
+-- happen: the dashboard deletes a student's files through the API before deleting
+-- their session row, and purge.py does the same in bulk. session_files() below is
+-- how either one finds out what to delete.
+-- ---------------------------------------------------------------------------
+
+create or replace function public.session_files(older_than_days int default 30)
+returns table (bucket text, path text)
+language sql stable security definer set search_path = public, pg_temp as $$
+    -- Only for exams the caller proctors: this is called with a faculty token, and
+    -- it must not become a way to enumerate the whole project's files.
+    select b.bucket, s.id::text || '/' || b.name
+    from   public.sessions s
+    join   public.exams e on e.id = s.exam_id
+    cross join (values ('identity', 'id.jpg'), ('identity', 'selfie.jpg'),
+                       ('live', 'screen.jpg'), ('live', 'camera.jpg'))
+               as b(bucket, name)
+    where  e.faculty_id = auth.uid()
+      and  s.requested_at < now() - make_interval(days => older_than_days);
+$$;
+
+
+-- ---------------------------------------------------------------------------
 -- Row Level Security
 -- ---------------------------------------------------------------------------
 
@@ -467,9 +502,11 @@ on conflict (id) do update set public = false;
 
 drop policy if exists identity_student_write on storage.objects;
 drop policy if exists identity_read          on storage.objects;
+drop policy if exists identity_delete        on storage.objects;
 drop policy if exists live_student_write     on storage.objects;
 drop policy if exists live_student_update    on storage.objects;
 drop policy if exists live_read              on storage.objects;
+drop policy if exists live_delete            on storage.objects;
 
 create policy identity_student_write on storage.objects
     for insert with check (
@@ -505,35 +542,55 @@ create policy live_read on storage.objects
              or public.proctors_session(public.path_session(name)))
     );
 
+-- Delete, for both buckets. Needed because nothing in the database can clean these
+-- up (see the note above): the proctor's dashboard and purge.py remove them through
+-- the Storage API, and the API applies these policies. The owning student may also
+-- delete their own, so a retake is not blocked by a file that already exists.
+create policy identity_delete on storage.objects
+    for delete using (
+        bucket_id = 'identity'
+        and (public.owns_session(public.path_session(name))
+             or public.proctors_session(public.path_session(name)))
+    );
+
+create policy live_delete on storage.objects
+    for delete using (
+        bucket_id = 'live'
+        and (public.owns_session(public.path_session(name))
+             or public.proctors_session(public.path_session(name)))
+    );
+
 
 -- ---------------------------------------------------------------------------
 -- Retention
 --
 -- ID photos and selfies are identity documents belonging to real students, and
--- keeping them forever is the wrong default. Run this after grades are in, or
--- schedule it with pg_cron if the project has it enabled:
+-- keeping them forever is the wrong default.
 --
---     select public.purge_old_sessions(30);
+-- Use purge.py, not this function on its own. The files have to go through the
+-- Storage API first (see the note above); this only removes the rows, and calling
+-- it by itself would strand every image it was supposed to account for:
 --
--- It deletes the storage objects and the session rows (frames and events cascade).
+--     uv run --script cloud/purge.py --days 30
+--
+-- That lists the files with session_files(), deletes them through the API, then
+-- calls this to drop the rows. Frames and events cascade with the sessions.
 -- ---------------------------------------------------------------------------
 
 create or replace function public.purge_old_sessions(older_than_days int default 30)
 returns integer
-language plpgsql security definer set search_path = public, storage, pg_temp as $$
+language plpgsql security definer set search_path = public, pg_temp as $$
 declare
     removed integer;
 begin
-    delete from storage.objects
-    where bucket_id in ('identity', 'live')
-      and public.path_session(name) in (
-          select id from public.sessions
-          where requested_at < now() - make_interval(days => older_than_days)
-      );
-
+    -- Scoped to the caller's own exams, like session_files(), so a purge cannot
+    -- reach another proctor's sessions.
     with gone as (
-        delete from public.sessions
-        where requested_at < now() - make_interval(days => older_than_days)
+        delete from public.sessions s
+        using public.exams e
+        where e.id = s.exam_id
+          and e.faculty_id = auth.uid()
+          and s.requested_at < now() - make_interval(days => older_than_days)
         returning 1
     )
     select count(*) into removed from gone;
@@ -541,5 +598,3 @@ begin
     return removed;
 end;
 $$;
-
-revoke all on function public.purge_old_sessions(int) from anon, authenticated;

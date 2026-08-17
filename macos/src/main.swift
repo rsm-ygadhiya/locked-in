@@ -70,11 +70,22 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             dashboard = (object["dashboard_url"] as? String) ?? ""
         }
-        if let url = URL(string: dashboard), !dashboard.isEmpty,
-           url.scheme == "http" || url.scheme == "https" {
-            NSWorkspace.shared.open(url)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { NSApp.terminate(nil) }
-            return
+        // Three shapes are all legitimate here, because SETUP.md offers all three:
+        // a published https page, a file:// URL, or a plain path to the .html on disk
+        // for a proctor who just opens the file.
+        if !dashboard.isEmpty {
+            var target: URL? = nil
+            if dashboard.hasPrefix("/") {
+                target = URL(fileURLWithPath: dashboard)
+            } else if let url = URL(string: dashboard),
+                      ["http", "https", "file"].contains(url.scheme ?? "") {
+                target = url
+            }
+            if let url = target {
+                NSWorkspace.shared.open(url)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { NSApp.terminate(nil) }
+                return
+            }
         }
         alert("No dashboard address set",
               "The proctor dashboard is a web page, and this Mac does not know where "
