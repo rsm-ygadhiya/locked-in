@@ -163,17 +163,54 @@
 </head>
 <body>
 
-<!-- ===================== login ===================== -->
-<div id="login" class="card" hidden>
+<!-- Anything that goes wrong before the page can render itself lands here. Without
+     this a script error means a completely blank screen, which is indistinguishable
+     from "the page didn't load" — and that is exactly how it was first reported. -->
+<div id="fatal" class="card" style="display:none;max-width:640px;margin:8vh auto">
+  <h1 style="font-size:20px;color:var(--danger);margin-bottom:10px">
+    This page could not start</h1>
+  <p id="fatalMsg" style="color:var(--text);font-size:14px;line-height:1.6"></p>
+  <p style="color:var(--muted);font-size:13px;margin-top:14px">
+    If this mentions a syntax error, the browser is too old for this page. Safari 14
+    or newer, or any recent Chrome, will work.</p>
+</div>
+
+<script>
+  // Deliberately a separate, tiny, old-syntax script: it has to survive whatever
+  // breaks in the main one, including a parse error, which still reaches onerror.
+  window.onerror = function (message, source, line) {
+    try {
+      var box = document.getElementById('fatal');
+      var msg = document.getElementById('fatalMsg');
+      if (box && msg) {
+        msg.textContent = message + ' (line ' + line + ')';
+        box.style.display = 'block';
+        var login = document.getElementById('login');
+        if (login) { login.style.display = 'none'; }
+      }
+    } catch (e) {}
+    return false;
+  };
+</script>
+
+<!-- ===================== login =====================
+     Not hidden by default, on purpose: the sign-in form is what this page is for
+     when nobody is signed in, and it should be readable even if scripting fails. -->
+<div id="login" class="card">
   <h1>Locked In 🔒</h1>
   <p class="sub">Proctor sign-in</p>
   <label class="field">
     <span>Campus ID or email</span>
-    <input id="loginId" autocomplete="username" autofocus>
+    <!-- autocapitalize/autocorrect off matters on phones: iOS capitalises the first
+         letter of a text field and will happily "correct" a campus ID into an
+         unrelated word, so a proctor types yugadhiya and sends something else. -->
+    <input id="loginId" autocomplete="username" autocapitalize="none"
+           autocorrect="off" spellcheck="false" inputmode="email" autofocus>
   </label>
   <label class="field">
     <span>Password</span>
-    <input id="loginPw" type="password" autocomplete="current-password">
+    <input id="loginPw" type="password" autocomplete="current-password"
+           autocapitalize="none" autocorrect="off" spellcheck="false">
   </label>
   <div class="row" style="margin-top:6px">
     <button id="loginBtn">Sign in</button>
@@ -252,15 +289,33 @@ const SIGNED_TTL = 30;
 // Tiny Supabase REST client. Same three APIs the Python client uses.
 // ===========================================================================
 const store = {
-  get token() { return sessionStorage.getItem("li_token"); },
-  get refresh() { return sessionStorage.getItem("li_refresh"); },
+  // Every access is wrapped: Safari throws on sessionStorage in some privacy modes,
+  // and an exception here would happen before anything is drawn — a blank page.
+  // Falling back to memory means the tab still works, it just forgets on reload.
+  _mem: {},
+  _get(k) {
+    try { return sessionStorage.getItem(k); } catch (e) { return this._mem[k] || null; }
+  },
+  get token() { return this._get("li_token"); },
+  get refresh() { return this._get("li_refresh"); },
   set(tok, ref) {
     // sessionStorage, not localStorage: a proctor's token should not outlive the
     // browser tab on a shared podium machine.
-    if (tok) sessionStorage.setItem("li_token", tok);
-    if (ref) sessionStorage.setItem("li_refresh", ref);
+    try {
+      if (tok) sessionStorage.setItem("li_token", tok);
+      if (ref) sessionStorage.setItem("li_refresh", ref);
+    } catch (e) {
+      if (tok) this._mem["li_token"] = tok;
+      if (ref) this._mem["li_refresh"] = ref;
+    }
   },
-  clear() { sessionStorage.removeItem("li_token"); sessionStorage.removeItem("li_refresh"); },
+  clear() {
+    this._mem = {};
+    try {
+      sessionStorage.removeItem("li_token");
+      sessionStorage.removeItem("li_refresh");
+    } catch (e) {}
+  },
 };
 
 let me = null;          // { id, email, full_name, role }
@@ -363,13 +418,26 @@ function escapeHtml(text) {
 // ===========================================================================
 // Auth
 // ===========================================================================
+// Sign-in problems are reported inside the login card, not only as a toast. On a
+// phone the toast sits at the bottom of a tall page and is easy to miss entirely,
+// which turns a readable error into "it just doesn't work".
+function loginSays(message, bad) {
+  const note = $("loginNote");
+  note.textContent = message || "";
+  note.style.color = bad ? "var(--danger)" : "var(--muted)";
+}
+
 async function signIn() {
   const raw = $("loginId").value.trim();
   const password = $("loginPw").value;
-  if (!raw || !password) return toast("Enter your ID and password.", true);
+  if (!raw || !password) {
+    loginSays("Enter your ID and password.", true);
+    return;
+  }
   const email = raw.includes("@") ? raw.toLowerCase()
                                   : `${raw}@${ID_EMAIL_DOMAIN}`.toLowerCase();
   $("loginBtn").disabled = true;
+  loginSays("Signing in as " + email + "…", false);
   try {
     const data = await call("/auth/v1/token?grant_type=password", {
       method: "POST", auth: false,
@@ -377,9 +445,21 @@ async function signIn() {
       body: { email, password },
     });
     store.set(data.access_token, data.refresh_token);
+    loginSays("", false);
     await boot();
   } catch (error) {
-    toast("Sign-in failed: " + error.message, true);
+    // A network-layer failure and a rejected password are different problems and
+    // want different advice, so they are named separately rather than both
+    // becoming "sign-in failed".
+    const network = /load failed|failed to fetch|networkerror|timed out/i
+                    .test(error.message || "");
+    loginSays(network
+      ? "Could not reach the server. This device needs internet access as well as "
+        + "the local network — check Wi-Fi or mobile data, then try again. "
+        + "(" + error.message + ")"
+      : "Sign-in failed: " + error.message
+        + "  —  tried the address " + email, true);
+    toast("Sign-in failed", true);
   } finally {
     $("loginBtn").disabled = false;
   }
@@ -492,7 +572,8 @@ async function loadFrames(sessionIds) {
     `/rest/v1/live_frames?select=*&session_id=in.${encodeURIComponent(list)}`) || [];
   const bySession = {};
   for (const row of rows) {
-    (bySession[row.session_id] ||= {})[row.kind] = row;
+    if (!bySession[row.session_id]) { bySession[row.session_id] = {}; }
+    bySession[row.session_id][row.kind] = row;
   }
   return bySession;
 }
@@ -785,21 +866,23 @@ async function boot() {
     $("loginBtn").disabled = true;
     return;
   }
-  if (!store.token) { $("login").hidden = false; return; }
+  if (!store.token) { return; }              // login form is already showing
 
   try {
     me = await loadMe();
-  } catch (_) {
+  } catch (error) {
+    // Silently bouncing back to the login form here was itself a bug: the password
+    // was accepted, the *next* call failed, and the page just looked like it had
+    // refused the sign-in.
     store.clear();
-    $("login").hidden = false;
+    loginSays("Signed in, but your profile could not be loaded: " + error.message,
+              true);
     return;
   }
   if (me.role !== "faculty") {
-    $("login").hidden = false;
-    $("loginNote").textContent =
-      "That account is a student account. A proctor account has to be promoted in " +
-      "the database first: update public.profiles set role = 'faculty' where " +
-      "campus_id = '…';";
+    loginSays("That account is a student account, so there is nothing to proctor. "
+      + "A proctor account has to be promoted in the database: "
+      + "update public.profiles set role = 'faculty' where campus_id = '…';", true);
     store.clear();
     return;
   }

@@ -90,18 +90,91 @@ def machine_label() -> str:
 # small Tk helpers
 # ---------------------------------------------------------------------------
 
+class FlatButton(tk.Frame):
+    """
+    A button that actually honours the colours it is given.
+
+    tk.Button on macOS ignores bg and fg entirely and draws the system button face,
+    so a light-on-dark scheme comes out as near-white text on a near-white button.
+    That is not a cosmetic complaint: it made "Cancel" and "I need to create an
+    account" genuinely unreadable, because those are the secondary style where the
+    text colour is the light one.
+
+    A Frame with a Label inside is drawn by Tk rather than by Aqua, so every colour
+    applies on every platform. The API mirrors the part of tk.Button used here:
+    configure(text=...), configure(state=...), invoke(), and the geometry methods
+    come free from Frame.
+    """
+
+    def __init__(self, parent: tk.Misc, text: str, command: Callable[[], None], *,
+                 primary: bool = True, **kwargs):
+        self.fill = ACCENT if primary else "#13301f"
+        self.ink = "#052e16" if primary else TEXT
+        self.hover = "#86efac" if primary else "#1b4430"
+        self.command = command
+        self._state = "normal"
+
+        super().__init__(parent, bg=self.fill, cursor="hand2",
+                         highlightthickness=0 if primary else 1,
+                         highlightbackground=ACCENT, highlightcolor=ACCENT,
+                         **kwargs)
+        self.label = tk.Label(self, text=text, bg=self.fill, fg=self.ink,
+                              font=("Helvetica", 13, "bold"), padx=22, pady=11,
+                              cursor="hand2")
+        self.label.pack()
+
+        for widget in (self, self.label):
+            widget.bind("<Button-1>", self._clicked)
+            widget.bind("<Enter>", self._enter)
+            widget.bind("<Leave>", self._leave)
+
+    def _paint(self, colour: str) -> None:
+        self.configure(bg=colour)
+        self.label.configure(bg=colour)
+
+    def _enter(self, _event=None) -> None:
+        if self._state == "normal":
+            self._paint(self.hover)
+
+    def _leave(self, _event=None) -> None:
+        if self._state == "normal":
+            self._paint(self.fill)
+
+    def _clicked(self, _event=None) -> None:
+        if self._state == "normal":
+            self.command()
+
+    def invoke(self) -> None:
+        self._clicked()
+
+    def configure(self, **kwargs):            # type: ignore[override]
+        if "text" in kwargs:
+            self.label.configure(text=kwargs.pop("text"))
+        if "state" in kwargs:
+            self._state = kwargs.pop("state")
+            disabled = self._state == "disabled"
+            self.label.configure(fg="#4b6b58" if disabled else self.ink)
+            self._paint("#16241c" if disabled else self.fill)
+            cursor = "" if disabled else "hand2"
+            super().configure(cursor=cursor)
+            self.label.configure(cursor=cursor)
+        if kwargs:
+            super().configure(**kwargs)
+        return None
+
+    config = configure
+
+    def cget(self, key: str):                 # type: ignore[override]
+        if key == "text":
+            return self.label.cget("text")
+        if key == "state":
+            return self._state
+        return super().cget(key)
+
+
 def styled_button(parent: tk.Misc, text: str, command: Callable[[], None], *,
-                  primary: bool = True, **kwargs) -> tk.Button:
-    return tk.Button(
-        parent, text=text, command=command,
-        bg=ACCENT if primary else PANEL,
-        fg="#052e16" if primary else TEXT,
-        activebackground="#86efac" if primary else "#12301f",
-        activeforeground="#052e16" if primary else TEXT,
-        relief="flat", bd=0, padx=22, pady=11,
-        font=("Helvetica", 13, "bold"), cursor="hand2",
-        highlightthickness=0, **kwargs,
-    )
+                  primary: bool = True, **kwargs) -> FlatButton:
+    return FlatButton(parent, text, command, primary=primary, **kwargs)
 
 
 def label(parent: tk.Misc, text: str, *, size: int = 13, bold: bool = False,
@@ -479,14 +552,25 @@ class CheckIn(tk.Tk):
         )
         label(card, terms, size=12, wraplength=780, color=TEXT).pack(anchor="w")
 
+        # The wording lives in its own Label rather than in the Checkbutton's text,
+        # for the same reason as FlatButton: Aqua ignores fg on a Checkbutton, so the
+        # sentence a student is agreeing to can come out unreadable. Clicking the
+        # words toggles the box, as people expect.
         agreed = tk.BooleanVar(value=False)
+        consent_row = tk.Frame(card, bg=PANEL)
+        consent_row.pack(anchor="w", pady=(20, 18), fill="x")
         check = tk.Checkbutton(
-            card, text="  I have read this and I agree to be recorded and monitored",
-            variable=agreed, bg=PANEL, fg=TEXT, selectcolor="#0f2417",
-            activebackground=PANEL, activeforeground=TEXT, font=("Helvetica", 12),
-            highlightthickness=0, bd=0, anchor="w",
+            consent_row, variable=agreed, bg=PANEL, selectcolor="#0f2417",
+            activebackground=PANEL, highlightthickness=0, bd=0,
         )
-        check.pack(anchor="w", pady=(20, 18))
+        check.pack(side="left")
+        consent_text = label(
+            consent_row,
+            "I have read this and I agree to be recorded and monitored",
+            size=12, bold=True)
+        consent_text.pack(side="left", padx=(6, 0))
+        consent_text.configure(cursor="hand2")
+        consent_text.bind("<Button-1>", lambda _e: check.invoke())
 
         row = tk.Frame(card, bg=PANEL)
         row.pack(fill="x")

@@ -11,7 +11,7 @@ It runs in either of two modes:
 - **Proctored** ([set it up](cloud/SETUP.md)): students sign in, photograph their
   student ID, and wait for a proctor to admit them; the proctor watches a live grid
   of every screen and webcam from a web dashboard. Filling in a Supabase project in
-  the admin panel is what switches this on.
+  the exam settings is what switches this on.
 
 > **This is a focus and monitoring tool, not a secure exam browser.** Force Quit, Task
 > Manager, a reboot, or a second device all defeat the lockdown. For a graded exam,
@@ -34,7 +34,7 @@ It runs in either of two modes:
 | **No escape hatches** | Incognito disabled, DevTools disabled |
 | **Other apps killed** | Non-system apps are quit; you're snapped back to Chrome |
 | **Can't quit** | Closing Chrome relaunches it and demands the passcode — the prompt keeps returning |
-| **No plaintext passcode** | The passcode is stored as a PBKDF2-SHA256 hash, set in the admin panel |
+| **No plaintext passcode** | The passcode is stored as a PBKDF2-SHA256 hash, set in the exam settings |
 | **Always cleans up** | Recordings finalized, policy removed, Chrome unlocked on exit — even on Ctrl+C or crash |
 
 And in proctored mode:
@@ -175,13 +175,18 @@ Choose **Faculty → Exam settings** on either launcher, or run it directly:
 uv run --script admin_panel.py
 ```
 
-Default login is **`admin` / `admin`**, and the panel keeps warning you until both that
-password and the unlock passcode have been changed.
+Sign in with your **proctor account** — the same Supabase account that approves
+students in the dashboard. There is no separate admin password. A machine with no
+project configured yet opens straight into the settings, since there is nothing to
+authenticate against and entering the project is the reason you are there.
+
+The panel keeps warning until the unlock passcode has been changed from the shipped
+default.
 
 | Tab | What you set |
 |---|---|
 | **Allowed sites** | The one URL the session is pinned to, and the hosts Chrome may still load (SSO, 2FA, CDNs). Paste a whole URL into the host box and it keeps just the hostname. |
-| **Security** | The admin password, and the unlock passcode that ends a locked session. |
+| **Security** | The unlock passcode that ends a locked session. |
 | **Recording** | Which of screen / webcam / microphone to capture. |
 | **Proctoring** | The Supabase project behind proctored exams: project URL, anon key, dashboard address, and how often live thumbnails are published. **Test the connection** checks the two values without saving them. Leave the URL and key blank to run standalone. |
 
@@ -377,7 +382,7 @@ Cleanup runs automatically on exit either way: the recordings are finalized and 
 Chrome policy is removed, so Chrome always goes back to normal. A hard kill (Force Quit,
 power loss) loses the last few seconds of video rather than the whole file.
 
-If you've lost the admin password too, delete the settings file and the next run
+If you've lost the passcode as well, delete the settings file and the next run
 recreates it with the defaults.
 
 ---

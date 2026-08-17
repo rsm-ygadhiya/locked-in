@@ -5,16 +5,20 @@
 """
 admin_panel.py — the Locked In settings panel.
 
-A small Tk window, so one panel serves both macOS and Windows. Log in as the admin,
-then edit what the lockdown will do: which site it pins to, which hosts stay
-reachable, what the unlock passcode is, and which streams are recorded.
+A small Tk window, so one panel serves both macOS and Windows. It holds the exam
+settings — the site the lockdown pins to, the hosts that stay reachable, the unlock
+passcode, which streams are recorded, and the Supabase project behind proctored
+exams. They are the same settings, in the same file, on either platform.
 
     uv run --script admin_panel.py
 
-Defaults on a fresh install are username "admin", password "admin", and the panel
-keeps warning until both that password and the unlock passcode have been changed.
+Getting in: sign in with your proctor account, the same Supabase account that
+approves students in the dashboard. There is no separate admin password any more.
+A machine with no project configured yet opens straight into the settings — there
+is nothing to authenticate against, and entering the project is the reason you are
+there.
 
-Nothing typed here is written to disk in the clear — passwords go through
+The unlock passcode is never written to disk in the clear: it goes through
 lockedin_config.hash_secret (PBKDF2-SHA256) and only the hash is stored. See the
 honesty note at the top of lockedin_config.py about what that does and doesn't buy.
 """
@@ -35,7 +39,7 @@ PAD = {"padx": 12, "pady": 6}
 class AdminPanel(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
-        self.title("Locked In — Admin")
+        self.title("Locked In — Exam settings")
         self.resizable(False, False)
         self.config = store.load(create=True)
         # Failed logins cost an increasing wait, so the panel can't be brute-forced
@@ -46,52 +50,111 @@ class AdminPanel(tk.Tk):
     # ---------- login ----------
 
     def _build_login(self) -> None:
+        """
+        Ask for the proctor's Supabase account.
+
+        There used to be a separate local admin password here. One credential is
+        better than two, and this one is already the thing that means "you are the
+        proctor" — the same account that approves students in the dashboard.
+
+        The exception is a machine with no project configured yet. There is nothing
+        to authenticate against and nothing worth protecting, and the whole point of
+        opening the panel then is to enter the project details. So a fresh machine
+        opens straight into the settings.
+        """
+        cloud_ready = bool((self.config.get("cloud") or {}).get("url")
+                           and (self.config.get("cloud") or {}).get("anon_key"))
+        if not cloud_ready:
+            self._build_settings(first_run=True)
+            return
+
         self.login_frame = ttk.Frame(self)
         self.login_frame.grid(row=0, column=0, **PAD)
 
-        ttk.Label(self.login_frame, text="Locked In — Admin",
-                  font=("", 16, "bold")).grid(row=0, column=0, columnspan=2, pady=(4, 10))
+        ttk.Label(self.login_frame, text="Locked In — Exam settings",
+                  font=("", 16, "bold")).grid(row=0, column=0, columnspan=2, pady=(4, 2))
+        ttk.Label(self.login_frame, text="Sign in with your proctor account.",
+                  foreground="#555").grid(row=1, column=0, columnspan=2, pady=(0, 10))
 
-        ttk.Label(self.login_frame, text="Username").grid(row=1, column=0, sticky="e", **PAD)
+        ttk.Label(self.login_frame, text="Campus ID").grid(row=2, column=0, sticky="e", **PAD)
         self.user_entry = ttk.Entry(self.login_frame, width=26)
-        self.user_entry.grid(row=1, column=1, **PAD)
-        self.user_entry.insert(0, store.DEFAULT_ADMIN_USER)
+        self.user_entry.grid(row=2, column=1, **PAD)
 
-        ttk.Label(self.login_frame, text="Password").grid(row=2, column=0, sticky="e", **PAD)
+        ttk.Label(self.login_frame, text="Password").grid(row=3, column=0, sticky="e", **PAD)
         self.password_entry = ttk.Entry(self.login_frame, width=26, show="•")
-        self.password_entry.grid(row=2, column=1, **PAD)
+        self.password_entry.grid(row=3, column=1, **PAD)
 
-        self.login_error = ttk.Label(self.login_frame, text="", foreground="#c0392b")
-        self.login_error.grid(row=3, column=0, columnspan=2)
+        self.login_error = ttk.Label(self.login_frame, text="", foreground="#c0392b",
+                                     wraplength=300)
+        self.login_error.grid(row=4, column=0, columnspan=2)
 
-        ttk.Button(self.login_frame, text="Log in", command=self._try_login) \
-            .grid(row=4, column=0, columnspan=2, pady=(6, 10))
+        self.login_button = ttk.Button(self.login_frame, text="Sign in",
+                                       command=self._try_login)
+        self.login_button.grid(row=5, column=0, columnspan=2, pady=(6, 10))
 
         self.bind("<Return>", lambda _event: self._try_login())
-        self.password_entry.focus_set()
+        self.user_entry.focus_set()
 
     def _try_login(self) -> None:
-        username = self.user_entry.get()
+        username = self.user_entry.get().strip()
         password = self.password_entry.get()
-        if store.verify_admin(self.config, username, password):
-            self.failed_logins = 0
-            self.unbind("<Return>")
-            self.login_frame.destroy()
-            self._build_settings()
+        if not username or not password:
+            self.login_error.config(text="Enter your campus ID and password.")
             return
 
+        self.login_button.config(state="disabled")
+        self.login_error.config(text="Checking...")
+        self.update_idletasks()
+
+        try:
+            import lockedin_cloud
+        except ImportError:
+            self.login_button.config(state="normal")
+            self.login_error.config(
+                text="lockedin_cloud.py is missing next to this panel.")
+            return
+
+        try:
+            cloud = lockedin_cloud.Cloud.from_config(self.config)
+            session = cloud.sign_in(username, password)
+        except lockedin_cloud.CloudError as error:
+            self.login_button.config(state="normal")
+            self._reject(str(error)[:160])
+            return
+
+        if session.role != "faculty":
+            self.login_button.config(state="normal")
+            self._reject("That is a student account. Only a proctor can change "
+                         "these settings.")
+            return
+
+        self.failed_logins = 0
+        self.unbind("<Return>")
+        self.login_frame.destroy()
+        self._build_settings()
+
+    def _reject(self, message: str) -> None:
+        """A wrong answer costs an increasing wait, so this cannot be sat and guessed."""
         self.failed_logins += 1
         self.password_entry.delete(0, tk.END)
-        self.login_error.config(text="Wrong username or password.")
-        # 1s, 2s, 3s ... up to 5s between attempts.
-        delay = min(self.failed_logins, 5)
+        self.login_error.config(text=message)
+        delay = min(self.failed_logins, 5)          # 1s, 2s ... up to 5s
         self.password_entry.config(state="disabled")
         self.after(delay * 1000,
                    lambda: self.password_entry.config(state="normal"))
 
     # ---------- settings ----------
 
-    def _build_settings(self) -> None:
+    def _build_settings(self, first_run: bool = False) -> None:
+        if first_run:
+            # No project configured yet, so there was nothing to sign in against.
+            ttk.Label(self, foreground="#8a6d0b",
+                      text="No proctoring project is set up on this machine yet, so "
+                           "these settings are open.\nOnce you save a Supabase "
+                           "project below, opening this panel will ask for your "
+                           "proctor account.",
+                      justify="left").grid(row=2, column=0, sticky="w", padx=14,
+                                           pady=(0, 10))
         notebook = ttk.Notebook(self)
         notebook.grid(row=0, column=0, padx=12, pady=12)
         notebook.add(self._sites_tab(notebook), text="Allowed sites")
@@ -142,23 +205,26 @@ class AdminPanel(tk.Tk):
     def _security_tab(self, parent: ttk.Notebook) -> ttk.Frame:
         tab = ttk.Frame(parent)
 
-        ttk.Label(tab, text="Admin password", font=("", 13, "bold")) \
+        # There is no admin password any more. This panel is gated on the proctor's
+        # Supabase account, which is the same identity that approves students, so a
+        # second local password was one more thing to set and forget.
+        ttk.Label(tab, text="Who can open this panel", font=("", 13, "bold")) \
             .grid(row=0, column=0, columnspan=2, sticky="w", **PAD)
-        ttk.Label(tab, text="Opens this panel. Leave blank to keep the current one.") \
+        ttk.Label(tab, text="Your proctor account, the same one you use for the\n"
+                            "dashboard. Change that password in Supabase.",
+                  foreground="#555") \
             .grid(row=1, column=0, columnspan=2, sticky="w", padx=12)
-        self.new_admin_password = self._password_row(tab, "New password", 2)
-        self.confirm_admin_password = self._password_row(tab, "Confirm", 3)
 
         ttk.Separator(tab, orient="horizontal") \
-            .grid(row=4, column=0, columnspan=2, sticky="ew", pady=10)
+            .grid(row=2, column=0, columnspan=2, sticky="ew", pady=10)
 
         ttk.Label(tab, text="Unlock passcode", font=("", 13, "bold")) \
-            .grid(row=5, column=0, columnspan=2, sticky="w", **PAD)
+            .grid(row=3, column=0, columnspan=2, sticky="w", **PAD)
         ttk.Label(tab, text="What ends a locked session. Give this to whoever\n"
                             "is meant to be able to stop the exam.") \
-            .grid(row=6, column=0, columnspan=2, sticky="w", padx=12)
-        self.new_passcode = self._password_row(tab, "New passcode", 7)
-        self.confirm_passcode = self._password_row(tab, "Confirm", 8)
+            .grid(row=4, column=0, columnspan=2, sticky="w", padx=12)
+        self.new_passcode = self._password_row(tab, "New passcode", 5)
+        self.confirm_passcode = self._password_row(tab, "Confirm", 6)
         return tab
 
     def _password_row(self, tab: ttk.Frame, label: str, row: int) -> ttk.Entry:
@@ -298,18 +364,13 @@ class AdminPanel(tk.Tk):
             self.hosts_list.delete(index)
 
     def _warn_about_defaults(self) -> None:
-        warnings = []
-        if self.config["admin"].get("is_default"):
-            warnings.append("• the admin password is still \"admin\"")
         if self.config.get("passcode_is_default"):
-            warnings.append("• the unlock passcode is still the shipped default")
-        if warnings:
             messagebox.showwarning(
-                "Change the defaults",
-                "Anyone who has seen this project knows these:\n\n"
-                + "\n".join(warnings)
-                + "\n\nSet your own under the Security tab before using this for "
-                  "anything real.")
+                "Change the passcode",
+                "The unlock passcode is still the shipped default, which anyone who "
+                "has seen this project knows.\n\nIt is the only way to end a locked "
+                "session, so set your own under the Security tab before using this "
+                "for anything real.")
 
     def _save(self) -> None:
         url = self.url_entry.get().strip()
@@ -323,17 +384,6 @@ class AdminPanel(tk.Tk):
                                  "Leave at least one allowed host, or Chrome will "
                                  "block the exam site itself.")
             return
-
-        new_admin = self.new_admin_password.get()
-        if new_admin:
-            if new_admin != self.confirm_admin_password.get():
-                messagebox.showerror("Check the password",
-                                     "The two admin passwords don't match.")
-                return
-            if len(new_admin) < 4:
-                messagebox.showerror("Check the password",
-                                     "Use at least 4 characters.")
-                return
 
         new_passcode = self.new_passcode.get()
         if new_passcode:
@@ -387,14 +437,11 @@ class AdminPanel(tk.Tk):
             return
         self.config["cloud"] = cloud
 
-        if new_admin:
-            store.set_admin_password(self.config, new_admin)
         if new_passcode:
             store.set_passcode(self.config, new_passcode)
 
         path = store.save(self.config)
-        for entry in (self.new_admin_password, self.confirm_admin_password,
-                      self.new_passcode, self.confirm_passcode):
+        for entry in (self.new_passcode, self.confirm_passcode):
             entry.delete(0, tk.END)
         self.status.config(text=f"Saved to {path}")
         messagebox.showinfo("Saved", "Settings saved. They apply to the next session.")

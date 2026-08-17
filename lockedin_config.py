@@ -11,15 +11,15 @@ top of guided-access.command / guided-access.ps1:
 
     allowed_url      the one site the session is pinned to
     allowed_hosts    hostnames Chrome is still allowed to load (SSO, 2FA, ...)
-    admin            username + PBKDF2 hash of the admin-panel password
     passcode         PBKDF2 hash of the unlock passcode
     recording        which of screen / camera / audio to capture
     cloud            the Supabase project behind the Student / Faculty flow;
                      empty means this machine runs standalone, as it always did
 
-Neither password is stored — only a PBKDF2-HMAC-SHA256 hash with a random 16-byte salt
-and 200,000 iterations. So a student who opens the config file finds no usable secret,
-which is the whole reason this file exists.
+The passcode is not stored — only a PBKDF2-HMAC-SHA256 hash with a random 16-byte
+salt and 200,000 iterations. So a student who opens the config file finds no usable
+secret, which is the whole reason this file exists. (The anon key in the cloud block
+is not a secret; see the note on DEFAULT_CLOUD.)
 
 What that does NOT do — say so plainly to anyone approving this tool: whoever
 administers the machine can still delete or replace this file and set their own
@@ -37,7 +37,6 @@ CLI (used by the lockdown scripts; all output is plain text on stdout):
     python3 lockedin_config.py get-cloud        print the cloud block as JSON
     python3 lockedin_config.py cloud-enabled    exit 0 if a Supabase project is set
     python3 lockedin_config.py verify-passcode  read passcode on STDIN; exit 0 if correct
-    python3 lockedin_config.py verify-admin     read "user\\npassword" on STDIN; exit 0 if ok
 
 Secrets are read from stdin, never taken as arguments — an argument would be visible
 to every other process on the machine via the process list.
@@ -56,8 +55,6 @@ from pathlib import Path
 ITERATIONS = 200_000
 DEFAULT_URL = "https://rsm-django-02.ucsd.edu/video-exam/station/"
 DEFAULT_HOSTS = ["rsm-django-02.ucsd.edu", "ucsd.edu", "duosecurity.com"]
-DEFAULT_ADMIN_USER = "admin"
-DEFAULT_ADMIN_PASSWORD = "admin"
 DEFAULT_PASSCODE = "letmeout"
 
 # The proctoring backend. Empty url/anon_key means this machine runs in the
@@ -138,13 +135,6 @@ def defaults() -> dict:
         "version": 1,
         "allowed_url": DEFAULT_URL,
         "allowed_hosts": list(DEFAULT_HOSTS),
-        "admin": {
-            "username": DEFAULT_ADMIN_USER,
-            "password": hash_secret(DEFAULT_ADMIN_PASSWORD),
-            # Flipped to False by the admin panel the first time both defaults are
-            # changed; the panel warns while this is True.
-            "is_default": True,
-        },
         "passcode": hash_secret(DEFAULT_PASSCODE),
         "passcode_is_default": True,
         "recording": {"screen": True, "camera": True, "audio": True},
@@ -193,23 +183,9 @@ def save(config: dict) -> Path:
 
 # ---------- mutations used by the admin panel ----------
 
-def set_admin_password(config: dict, new_password: str) -> None:
-    config["admin"]["password"] = hash_secret(new_password)
-    config["admin"]["is_default"] = new_password == DEFAULT_ADMIN_PASSWORD
-
-
 def set_passcode(config: dict, new_passcode: str) -> None:
     config["passcode"] = hash_secret(new_passcode)
     config["passcode_is_default"] = new_passcode == DEFAULT_PASSCODE
-
-
-def verify_admin(config: dict, username: str, password: str) -> bool:
-    if username.strip().lower() != str(config["admin"]["username"]).strip().lower():
-        # Still run the hash so a wrong username and a wrong password take the
-        # same amount of time.
-        check_secret(config["admin"]["password"], password)
-        return False
-    return check_secret(config["admin"]["password"], password)
 
 
 def verify_passcode(config: dict, entry: str) -> bool:
@@ -266,12 +242,6 @@ def main(argv: list[str]) -> int:
         # Trailing newline from the shell's pipe is not part of the passcode.
         entry = sys.stdin.read().rstrip("\r\n")
         return 0 if verify_passcode(config, entry) else 1
-
-    if command == "verify-admin":
-        lines = sys.stdin.read().splitlines()
-        if len(lines) < 2:
-            return 1
-        return 0 if verify_admin(config, lines[0], lines[1]) else 1
 
     print(f"unknown command: {command}", file=sys.stderr)
     print(__doc__.strip(), file=sys.stderr)
