@@ -272,17 +272,65 @@ def macos_camera_access() -> str:
 
 def camera_devices() -> list[str]:
     """Device names as AVFoundation sees them, for diagnostics on macOS."""
+    return [name for _, name, _ in macos_video_devices()]
+
+
+def macos_video_devices() -> list[tuple[int, str, str]]:
+    """
+    (index, name, device type) for each camera, in the order OpenCV indexes them.
+
+    OpenCV's AVFoundation backend walks the same devicesWithMediaType_ list, so a
+    position here is the index to hand cv2.VideoCapture.
+    """
     if not IS_MAC:
         return []
     try:
         import AVFoundation as AVF
-        return [d.localizedName()
-                for d in AVF.AVCaptureDevice.devicesWithMediaType_(AVF.AVMediaTypeVideo)]
+        devices = AVF.AVCaptureDevice.devicesWithMediaType_(AVF.AVMediaTypeVideo)
+        return [(i, str(d.localizedName()), str(d.deviceType()))
+                for i, d in enumerate(devices)]
     except Exception:                             # noqa: BLE001 - diagnostics only
         return []
 
 
-def open_camera(preferred: int):
+# How much we want each kind of camera, highest first. The point of this is the
+# negative scores: with an iPhone nearby, macOS offers Continuity Camera alongside
+# the built-in one, and it can land at index 0 — so an exam that should be filming
+# the student's face through their laptop lid ends up filming whatever the phone is
+# pointing at, usually a desk or a ceiling. Desk View is the same problem: it is a
+# real camera that returns real frames, aimed at the wrong thing.
+CAMERA_PREFERENCE = {
+    "AVCaptureDeviceTypeBuiltInWideAngleCamera": 100,
+    "AVCaptureDeviceTypeExternal": 10,          # a plugged-in USB webcam is fine
+    "AVCaptureDeviceTypeExternalUnknown": 10,
+    "AVCaptureDeviceTypeContinuityCamera": -50,  # the iPhone
+    "AVCaptureDeviceTypeDeskViewCamera": -100,   # points down at the desk
+}
+
+
+def camera_candidates(requested: int) -> list[int]:
+    """
+    Which camera indices to try, best first.
+
+    A requested index of 0 or more is an explicit choice and goes to the front
+    untouched — someone who passes --camera-index 2 means it. Otherwise the cameras
+    are ranked by what they are, so the laptop's own camera wins over an iPhone that
+    happens to be on the desk.
+    """
+    devices = macos_video_devices()
+    if not devices:
+        # Windows, Linux, or AVFoundation unavailable: fall back to scanning.
+        ordered = [] if requested < 0 else [requested]
+        return ordered + [i for i in range(4) if i != requested]
+
+    ranked = sorted(devices, key=lambda d: (-CAMERA_PREFERENCE.get(d[2], 0), d[0]))
+    order = [index for index, _, _ in ranked]
+    if requested >= 0:
+        order = [requested] + [i for i in order if i != requested]
+    return order
+
+
+def open_camera(preferred: int = -1):
     """
     Find a camera that actually delivers frames.
 
@@ -290,6 +338,9 @@ def open_camera(preferred: int):
     produce a single frame — index 0 under the AVFoundation backend does exactly that
     on some Macs while index 1 works, and OpenCV's own device enumeration is unreliable
     there. So every combination is judged on whether a real frame arrives.
+
+    Pass -1 to pick automatically, which prefers the built-in camera over an iPhone
+    on Continuity or the downward-facing Desk View; see camera_candidates.
     """
     import cv2
 
@@ -302,8 +353,8 @@ def open_camera(preferred: int):
         backends = [(cv2.CAP_V4L2, "V4L2")]
     backends.append((cv2.CAP_ANY, "ANY"))
 
-    # The requested index is tried first, on every backend, before scanning the others.
-    indices = [preferred] + [i for i in range(4) if i != preferred]
+    indices = camera_candidates(preferred)
+    named = {index: name for index, name, _ in macos_video_devices()}
 
     for backend, backend_name in backends:
         for index in indices:
@@ -317,7 +368,8 @@ def open_camera(preferred: int):
             for _ in range(10):
                 ok, frame = camera.read()
                 if ok and frame is not None:
-                    log(f"camera: {backend_name} index {index}")
+                    label = named.get(index, f"index {index}")
+                    log(f"camera: using \"{label}\" ({backend_name} index {index})")
                     return camera, frame
                 time.sleep(0.2)
             log(f"camera: {backend_name} index {index} opened but sent no frames — "
@@ -450,7 +502,8 @@ def keep_display_awake() -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Locked In session recorder")
-    parser.add_argument("--out-dir", required=True,
+    # Not required=True, because --list-cameras is a diagnostic that writes nothing.
+    parser.add_argument("--out-dir",
                        help="session folder; screen.mp4 / camera.mp4 / audio.wav land here")
     parser.add_argument("--no-screen", action="store_true", help="skip screen capture")
     parser.add_argument("--no-camera", action="store_true", help="skip webcam capture")
@@ -461,8 +514,11 @@ def main() -> int:
                        help="webcam frame rate (default 15)")
     parser.add_argument("--max-width", type=int, default=1600,
                        help="downscale the screen past this width (default 1600)")
-    parser.add_argument("--camera-index", type=int, default=0,
-                       help="which camera to use (default 0)")
+    parser.add_argument("--camera-index", type=int, default=-1,
+                       help="which camera to use; default -1 picks the built-in one "
+                            "in preference to an iPhone on Continuity or Desk View")
+    parser.add_argument("--list-cameras", action="store_true",
+                       help="print the cameras this machine offers, then exit")
     parser.add_argument("--audio-rate", type=int, default=44100,
                        help="microphone sample rate (default 44100)")
     parser.add_argument("--live-tiles", action="store_true",
@@ -472,6 +528,23 @@ def main() -> int:
     parser.add_argument("--live-width", type=int, default=640,
                        help="live tile width in pixels (default 640)")
     args = parser.parse_args()
+
+    if args.list_cameras:
+        devices = macos_video_devices()
+        if not devices:
+            print("no cameras reported (or not macOS — indices 0-3 will be scanned)")
+            return 0
+        chosen = camera_candidates(-1)
+        for index, name, kind in devices:
+            mark = "->" if chosen and index == chosen[0] else "  "
+            short = kind.replace("AVCaptureDeviceType", "")
+            print(f"{mark} [{index}] {name}   ({short})")
+        print("\n'->' is the one picked automatically. "
+              "Override with --camera-index N.")
+        return 0
+
+    if not args.out_dir:
+        parser.error("--out-dir is required (except with --list-cameras)")
 
     out_dir = Path(args.out_dir).expanduser()
     out_dir.mkdir(parents=True, exist_ok=True)

@@ -24,8 +24,8 @@
 #
 # ---------- Settings ----------
 # The allowed URL, the allowed hosts, the unlock passcode and which streams get
-# recorded all live in the settings file now, not in this script. Edit them in the
-# admin panel (the "Admin" button on the launcher, or: uv run --script admin_panel.py).
+# recorded all live in the settings file now, not in this script. Edit them from the
+# launcher under Faculty > Settings for this Mac (or: uv run --script admin_panel.py).
 # The passcode is stored only as a PBKDF2 hash, so it is no longer sitting in plain
 # text in a file every student can open.
 RECORD_DIR="$HOME/Desktop/LockedIn-Recordings"
@@ -118,7 +118,7 @@ if [[ -z "$ALLOWED_URL" || ${#ALLOW_HOSTS[@]} -eq 0 ]]; then
 	echo "Could not read the settings. Open the admin panel and check them."
 	osascript -e 'display dialog "Could not read the Locked In settings.
 
-Open the admin panel (Admin button on the launcher) and check the allowed URL and hosts." buttons {"OK"} default button "OK" with title "Locked In" with icon stop' >/dev/null 2>&1
+Open the launcher, choose Faculty > Settings for this Mac, and check the allowed URL and hosts." buttons {"OK"} default button "OK" with title "Locked In" with icon stop' >/dev/null 2>&1
 	exit 1
 fi
 SESSION_DIR="$RECORD_DIR/$(date +%Y%m%d-%H%M%S)"

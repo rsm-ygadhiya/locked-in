@@ -38,6 +38,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
     func userContentController(_ u: WKUserContentController, didReceive m: WKScriptMessage) {
         guard let body = m.body as? String else { return }
         if body == "macos" { launchMac() }
+        // Both of these sit behind the Faculty button now: setting up a machine and
+        // proctoring from the dashboard are two halves of the same job, and neither
+        // is anything a student should be poking at. The settings panel still asks
+        // for the admin password — the button is only about where it lives.
         if body == "admin" { launchAdmin() }
         if body == "faculty" { openDashboard() }
     }
@@ -89,7 +93,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
         }
         alert("No dashboard address set",
               "The proctor dashboard is a web page, and this Mac does not know where "
-              + "it is published yet.\n\nOpen Admin on this screen and paste its "
+              + "it is published yet.\n\nGo back, choose Faculty > Settings for this Mac, "
+              + "and paste its "
               + "address into the Proctoring section — or open cloud/dashboard/"
               + "index.html directly in a browser.")
     }
@@ -189,10 +194,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
   .card code { background: rgba(74,222,128,.12); padding: 2px 7px; border-radius: 6px; color: #9ffcbf; }
   .close { margin-top: 18px; padding: 12px 22px; border-radius: 12px; border: 1px solid #4ade80; background: transparent; color: #eafff0; font-size: 15px; cursor: pointer; font-family: inherit; }
   .close:hover { background: rgba(74,222,128,.15); }
-  .admin { position: fixed; top: 18px; right: 20px; z-index: 3; cursor: pointer; font-size: 13px;
-           letter-spacing: 1px; color: #7fe0a0; opacity: .6; padding: 8px 14px; border-radius: 10px;
-           border: 1px solid rgba(74,222,128,.25); transition: opacity .15s ease, border-color .2s ease; }
-  .admin:hover { opacity: 1; border-color: #4ade80; }
+  .picks { display: flex; flex-direction: column; gap: 12px; margin: 18px 0 6px; }
+  .pick { text-align: left; padding: 16px 18px; border-radius: 14px; cursor: pointer;
+          background: rgba(74,222,128,.07); border: 1px solid rgba(74,222,128,.3);
+          transition: border-color .18s ease, background .18s ease; }
+  .pick:hover { border-color: #4ade80; background: rgba(74,222,128,.14); }
+  .pick .pl { font-size: 17px; font-weight: 700; color: #eafff0; }
+  .pick .pd { font-size: 13px; color: #9ffcbf; opacity: .85; margin-top: 5px; line-height: 1.5; }
   .alt { margin-top: 6px; font-size: 13px; color: #7fe0a0; opacity: .65; cursor: pointer;
          letter-spacing: 1px; padding: 8px 12px; border-radius: 10px; }
   .alt:hover { opacity: 1; }
@@ -201,7 +209,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
 <body>
   <canvas id="matrix"></canvas>
   <div class="veil"></div>
-  <div class="admin" onclick="pick('admin')">&#9881;&#65039; Admin</div>
 
   <div class="wrap">
     <div class="badge">// study mode engaged</div>
@@ -213,10 +220,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
         <div class="lbl">Student</div>
         <div class="hint">check in &amp; start the exam</div>
       </div>
-      <div class="btn" onclick="pick('faculty')">
+      <div class="btn" onclick="showFaculty()">
         <div class="ico">&#128104;&#8205;&#127979;</div>
         <div class="lbl">Faculty</div>
-        <div class="hint">approve students &amp; monitor</div>
+        <div class="hint">monitor &amp; set up this Mac</div>
       </div>
     </div>
     <div class="alt" onclick="showWin()">on Windows? &#128421;&#65039;</div>
@@ -233,6 +240,24 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
     </div>
   </div>
 
+  <div class="overlay" id="facOverlay">
+    <div class="card">
+      <h2>Faculty &#128104;&#8205;&#127979;</h2>
+      <p>Two halves of the job. Both ask you to sign in.</p>
+      <div class="picks">
+        <div class="pick" onclick="pick('faculty')">
+          <div class="pl">&#128200;&nbsp; Proctor dashboard</div>
+          <div class="pd">Create exams and join codes, approve students, watch the live grid. Opens in your browser.</div>
+        </div>
+        <div class="pick" onclick="pick('admin')">
+          <div class="pl">&#9881;&#65039;&nbsp; Settings for this Mac</div>
+          <div class="pd">Allowed sites, unlock passcode, what gets recorded, and the Supabase project. Needs the admin password.</div>
+        </div>
+      </div>
+      <button class="close" onclick="hideFac()">never mind</button>
+    </div>
+  </div>
+
 <script>
   // 'student' is the old 'macos' path: it starts the lockdown, which now runs the
   // check-in first whenever this machine is set up for proctored exams.
@@ -242,6 +267,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
   }
   function showWin() { document.getElementById('winOverlay').style.display = 'flex'; }
   function hideWin() { document.getElementById('winOverlay').style.display = 'none'; }
+  function showFaculty() { document.getElementById('facOverlay').style.display = 'flex'; }
+  function hideFac() { document.getElementById('facOverlay').style.display = 'none'; }
 
   const canvas = document.getElementById('matrix');
   const ctx = canvas.getContext('2d');

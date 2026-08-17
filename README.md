@@ -89,8 +89,10 @@ locked-in/
     └── Locked In.app         prebuilt, ad-hoc-signed macOS app (arm64)
 ```
 
-The launcher's start screen asks **Student** or **Faculty**; there is a smaller
-"on Windows?" link for the other platform's instructions, so you can copy this whole
+The launcher's start screen asks **Student** or **Faculty**. Faculty then offers the
+two halves of a proctor's job — the web dashboard, and the settings for that
+particular Mac — so machine setup is no longer a gear icon a student can wander into.
+There is a smaller "on Windows?" link for the other platform's instructions, so you can copy this whole
 folder to both machines (USB / iCloud / OneDrive) and use whichever applies. The `.py`
 files at the top level are shared by both platforms — keep them next to the platform
 folder, or in it, and each launcher will find them.
@@ -160,7 +162,7 @@ To exit: close Chrome, then enter the passcode.
 
 ## The admin panel
 
-Click **⚙ Admin** on either launcher, or run it directly:
+Choose **Faculty → Settings for this Mac** on the launcher, or run it directly:
 
 ```bash
 uv run --script admin_panel.py

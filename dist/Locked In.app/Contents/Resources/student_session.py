@@ -34,8 +34,12 @@ Run it directly to check the flow without a lockdown:
 
 Why Tk: it is in the standard library, so the check-in cannot fail because a UI
 toolkit did not install on a student's laptop five minutes before an exam. The
-webcam preview goes through cv2 -> PPM -> Tk PhotoImage, which avoids a Pillow
+webcam preview goes through cv2 -> PNG -> Tk PhotoImage, which avoids a Pillow
 dependency for the same reason.
+
+The camera is chosen by what it is, not by index: with an iPhone nearby macOS
+offers Continuity Camera too, and it can take index 0, which would film the desk
+instead of the student. See recorder.camera_candidates.
 """
 
 from __future__ import annotations
@@ -147,7 +151,7 @@ class Webcam:
     exit path through this UI closes it.
     """
 
-    def __init__(self, index: int = 0):
+    def __init__(self, index: int = -1):
         self.index = index
         self.capture: Any = None
         self.error: str | None = None
@@ -793,8 +797,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Locked In student check-in")
     parser.add_argument("--session-dir", required=True,
                        help="folder for handoff.json, token.json and the recordings")
-    parser.add_argument("--camera-index", type=int, default=0,
-                       help="which camera to use for the photos (default 0)")
+    parser.add_argument("--camera-index", type=int, default=-1,
+                       help="which camera to use for the photos; default -1 picks "
+                            "the built-in one over an iPhone on Continuity")
     args = parser.parse_args(argv)
 
     session_dir = Path(args.session_dir).expanduser()
