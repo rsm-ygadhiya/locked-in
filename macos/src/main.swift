@@ -39,6 +39,48 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
         guard let body = m.body as? String else { return }
         if body == "macos" { launchMac() }
         if body == "admin" { launchAdmin() }
+        if body == "faculty" { openDashboard() }
+    }
+
+    /// Ask lockedin_config.py for one value. Used to find the dashboard URL, which
+    /// lives in the settings file rather than being baked into this binary.
+    func configValue(_ arguments: [String]) -> String? {
+        guard let res = Bundle.main.resourcePath,
+              let runner = AppDelegate.pythonRunner() else { return nil }
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: runner.exe)
+        p.arguments = runner.args + [res + "/lockedin_config.py"] + arguments
+        let pipe = Pipe()
+        p.standardOutput = pipe
+        p.standardError = FileHandle.nullDevice
+        do { try p.run() } catch { return nil }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        p.waitUntilExit()
+        guard p.terminationStatus == 0 else { return nil }
+        return String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// The proctor side is a web page, so this just opens it in the default browser.
+    func openDashboard() {
+        // get-cloud prints JSON; pulling one field out of it with JSONSerialization
+        // beats adding a second CLI verb for every setting the launcher might want.
+        var dashboard = ""
+        if let json = configValue(["get-cloud"]),
+           let data = json.data(using: .utf8),
+           let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            dashboard = (object["dashboard_url"] as? String) ?? ""
+        }
+        if let url = URL(string: dashboard), !dashboard.isEmpty,
+           url.scheme == "http" || url.scheme == "https" {
+            NSWorkspace.shared.open(url)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { NSApp.terminate(nil) }
+            return
+        }
+        alert("No dashboard address set",
+              "The proctor dashboard is a web page, and this Mac does not know where "
+              + "it is published yet.\n\nOpen Admin on this screen and paste its "
+              + "address into the Proctoring section — or open cloud/dashboard/"
+              + "index.html directly in a browser.")
     }
 
     /// Where to find uv (preferred — it installs the script's own dependencies) or a
@@ -140,6 +182,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
            letter-spacing: 1px; color: #7fe0a0; opacity: .6; padding: 8px 14px; border-radius: 10px;
            border: 1px solid rgba(74,222,128,.25); transition: opacity .15s ease, border-color .2s ease; }
   .admin:hover { opacity: 1; border-color: #4ade80; }
+  .alt { margin-top: 6px; font-size: 13px; color: #7fe0a0; opacity: .65; cursor: pointer;
+         letter-spacing: 1px; padding: 8px 12px; border-radius: 10px; }
+  .alt:hover { opacity: 1; }
 </style>
 </head>
 <body>
@@ -150,19 +195,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
   <div class="wrap">
     <div class="badge">// study mode engaged</div>
     <h1>LOCKED IN &#128274;</h1>
-    <div class="sub">yo. where we locking in today?</div>
+    <div class="sub">who's signing in?</div>
     <div class="btns">
-      <div class="btn" onclick="pick('macos')">
-        <div class="ico"><svg viewBox="0 0 384 512" width="54" height="54" fill="#eafff0"><path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zm-56.6-164.2c27.3-32.4 24.8-61.9 24-72.5-24.1 1.4-52 16.4-67.9 34.9-17.5 19.8-27.8 44.3-25.6 71.9 26.1 2 49.9-11.4 69.5-34.3z"/></svg></div>
-        <div class="lbl">macOS</div>
-        <div class="hint">run it now</div>
+      <div class="btn" onclick="pick('student')">
+        <div class="ico">&#127891;</div>
+        <div class="lbl">Student</div>
+        <div class="hint">check in &amp; start the exam</div>
       </div>
-      <div class="btn" onclick="pick('windows')">
-        <div class="ico"><svg viewBox="0 0 448 512" width="52" height="52" fill="#eafff0"><path d="M0 93.7l183.6-25.3v177.4H0V93.7zm0 324.6l183.6 25.3V268.4H0v149.9zm203.8 28L448 480V268.4H203.8v177.9zm0-380.6v180.1H448V32L203.8 65.7z"/></svg></div>
-        <div class="lbl">Windows</div>
-        <div class="hint">how to run</div>
+      <div class="btn" onclick="pick('faculty')">
+        <div class="ico">&#128104;&#8205;&#127979;</div>
+        <div class="lbl">Faculty</div>
+        <div class="hint">approve students &amp; monitor</div>
       </div>
     </div>
+    <div class="alt" onclick="showWin()">on Windows? &#128421;&#65039;</div>
   </div>
 
   <div class="foot">no cap. only the assignment. touch grass later.</div>
@@ -177,10 +223,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
   </div>
 
 <script>
-  function pick(os) {
-    if (os === 'windows') { document.getElementById('winOverlay').style.display = 'flex'; return; }
-    try { window.webkit.messageHandlers.bridge.postMessage(os === 'admin' ? 'admin' : 'macos'); } catch (e) {}
+  // 'student' is the old 'macos' path: it starts the lockdown, which now runs the
+  // check-in first whenever this machine is set up for proctored exams.
+  function pick(role) {
+    var message = role === 'student' ? 'macos' : role;
+    try { window.webkit.messageHandlers.bridge.postMessage(message); } catch (e) {}
   }
+  function showWin() { document.getElementById('winOverlay').style.display = 'flex'; }
   function hideWin() { document.getElementById('winOverlay').style.display = 'none'; }
 
   const canvas = document.getElementById('matrix');

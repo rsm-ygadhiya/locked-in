@@ -1,0 +1,797 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Locked In — Proctor</title>
+<!--
+  index.html — the faculty side of Locked In.
+
+  One self-contained page. Open it from a file, from GitHub Pages, or from
+  Supabase Storage; it only ever talks to your Supabase project over HTTPS.
+
+  Fill in the two constants below with the values from
+  Supabase > Project Settings > API. The anon key belongs in here — it is
+  designed to be public, and every access rule is enforced by the Row Level
+  Security policies in ../schema.sql. Never paste the service_role key.
+
+  What a proctor does here:
+    * create an exam, which mints a join code to read out to the room
+    * approve or reject each student, seeing their ID photo next to their selfie
+    * watch the live grid: newest screen and webcam thumbnail per student
+    * click a student for their full-size frames and their event timeline
+-->
+<style>
+  :root {
+    --bg: #05100a;
+    --panel: #0a1a11;
+    --panel-2: #0e2317;
+    --line: #1b3d29;
+    --text: #e8fff1;
+    --muted: #7fe0a0;
+    --accent: #4ade80;
+    --danger: #f87171;
+    --warn: #fbbf24;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg); color: var(--text); min-height: 100vh;
+    font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+  code, .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+
+  header {
+    display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+    padding: 18px 26px; border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, #0a1a11, #05100a);
+    position: sticky; top: 0; z-index: 10;
+  }
+  header h1 { font-size: 19px; letter-spacing: .5px; }
+  header .who { margin-left: auto; color: var(--muted); font-size: 13px; }
+
+  main { padding: 26px; max-width: 1500px; margin: 0 auto; }
+  section { margin-bottom: 34px; }
+  h2 { font-size: 15px; text-transform: uppercase; letter-spacing: 1.6px;
+       color: var(--muted); margin-bottom: 14px; font-weight: 600; }
+
+  .card { background: var(--panel); border: 1px solid var(--line);
+          border-radius: var(--radius); padding: 20px; }
+
+  button {
+    font: inherit; font-weight: 600; cursor: pointer; border: 0;
+    border-radius: 10px; padding: 10px 18px;
+    background: var(--accent); color: #052e16;
+  }
+  button:hover { filter: brightness(1.1); }
+  button:disabled { opacity: .5; cursor: default; filter: none; }
+  button.ghost { background: var(--panel-2); color: var(--text);
+                 border: 1px solid var(--line); }
+  button.bad { background: var(--danger); color: #2b0707; }
+  button.small { padding: 6px 12px; font-size: 13px; border-radius: 8px; }
+
+  input, select {
+    font: inherit; color: var(--text); background: #0c2015;
+    border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px;
+    width: 100%;
+  }
+  input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  label.field { display: block; margin-bottom: 12px; }
+  label.field span { display: block; font-size: 12px; color: var(--muted);
+                     margin-bottom: 5px; }
+
+  .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+  .grow { flex: 1 1 220px; }
+
+  /* login ------------------------------------------------------------- */
+  #login { max-width: 420px; margin: 12vh auto; }
+  #login h1 { font-size: 26px; margin-bottom: 6px; }
+  #login p.sub { color: var(--muted); margin-bottom: 22px; font-size: 14px; }
+
+  /* approvals --------------------------------------------------------- */
+  .queue { display: grid; gap: 16px;
+           grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); }
+  .pending { background: var(--panel); border: 1px solid var(--line);
+             border-radius: var(--radius); overflow: hidden; }
+  .pending .photos { display: grid; grid-template-columns: 1fr 1fr; gap: 2px;
+                     background: #000; }
+  .pending .photos figure { position: relative; margin: 0; }
+  .pending .photos img { width: 100%; aspect-ratio: 4/3; object-fit: cover;
+                         display: block; background: #000; cursor: zoom-in; }
+  .pending .photos figcaption {
+    position: absolute; bottom: 0; left: 0; right: 0; font-size: 11px;
+    letter-spacing: 1px; text-transform: uppercase; padding: 4px 8px;
+    background: rgba(0,0,0,.65); color: var(--muted);
+  }
+  .pending .meta { padding: 14px 16px; }
+  .pending .name { font-weight: 700; font-size: 16px; }
+  .pending .sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
+  .pending .acts { display: flex; gap: 8px; padding: 0 16px 16px; }
+
+  .flag { display: inline-block; font-size: 11px; padding: 2px 8px;
+          border-radius: 999px; margin-top: 8px; }
+  .flag.warn { background: rgba(251,191,36,.15); color: var(--warn);
+               border: 1px solid rgba(251,191,36,.4); }
+
+  /* live grid --------------------------------------------------------- */
+  .grid { display: grid; gap: 14px;
+          grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+  .tile { background: var(--panel); border: 1px solid var(--line);
+          border-radius: var(--radius); overflow: hidden; cursor: pointer;
+          transition: border-color .15s, transform .15s; }
+  .tile:hover { border-color: var(--accent); transform: translateY(-2px); }
+  .tile .screen { position: relative; background: #000; aspect-ratio: 16/10; }
+  .tile .screen img { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .tile .cam { position: absolute; right: 8px; bottom: 8px; width: 34%;
+               border: 1px solid rgba(74,222,128,.5); border-radius: 6px;
+               background: #000; aspect-ratio: 4/3; object-fit: cover; }
+  .tile .bar { display: flex; align-items: center; gap: 8px; padding: 9px 12px; }
+  .tile .bar .nm { font-weight: 600; font-size: 14px; overflow: hidden;
+                   text-overflow: ellipsis; white-space: nowrap; }
+  .tile .bar .age { margin-left: auto; font-size: 12px; color: var(--muted); }
+  .tile.stale { border-color: rgba(248,113,113,.5); }
+  .tile.stale .age { color: var(--danger); }
+  .empty { color: var(--muted); font-size: 14px; padding: 18px 0; }
+
+  /* detail overlay ---------------------------------------------------- */
+  #overlay { position: fixed; inset: 0; z-index: 50; display: none;
+             background: rgba(0,0,0,.85); padding: 4vh 4vw; overflow: auto; }
+  #overlay.on { display: block; }
+  #overlay .sheet { max-width: 1100px; margin: 0 auto; background: var(--panel);
+                    border: 1px solid var(--line); border-radius: 18px; padding: 22px; }
+  #overlay img.big { width: 100%; border-radius: 10px; background: #000;
+                     display: block; }
+  .two { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; align-items: start; }
+  .events { max-height: 320px; overflow: auto; font-size: 13px; }
+  .events div { padding: 6px 0; border-bottom: 1px solid var(--line);
+                display: flex; gap: 10px; }
+  .events .t { color: var(--muted); flex: 0 0 78px; }
+
+  #toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+           background: var(--panel-2); border: 1px solid var(--line); color: var(--text);
+           padding: 12px 20px; border-radius: 12px; display: none; z-index: 80;
+           max-width: 90vw; }
+  #toast.on { display: block; }
+  #toast.bad { border-color: var(--danger); color: #ffe4e4; }
+
+  .banner { background: rgba(251,191,36,.12); border: 1px solid rgba(251,191,36,.4);
+            color: var(--warn); padding: 12px 16px; border-radius: 12px;
+            font-size: 13px; margin-bottom: 20px; }
+
+  @media (max-width: 760px) { .two { grid-template-columns: 1fr; } main { padding: 16px; } }
+</style>
+</head>
+<body>
+
+<!-- ===================== login ===================== -->
+<div id="login" class="card" hidden>
+  <h1>Locked In 🔒</h1>
+  <p class="sub">Proctor sign-in</p>
+  <label class="field">
+    <span>Campus ID or email</span>
+    <input id="loginId" autocomplete="username" autofocus>
+  </label>
+  <label class="field">
+    <span>Password</span>
+    <input id="loginPw" type="password" autocomplete="current-password">
+  </label>
+  <div class="row" style="margin-top:6px">
+    <button id="loginBtn">Sign in</button>
+  </div>
+  <p class="sub" id="loginNote" style="margin-top:16px"></p>
+</div>
+
+<!-- ===================== app ===================== -->
+<div id="app" hidden>
+  <header>
+    <h1>Locked In 🔒 <span style="color:var(--muted);font-weight:400">Proctor</span></h1>
+    <select id="examPick" style="width:auto;min-width:240px"></select>
+    <button class="ghost small" id="newExamBtn">New exam</button>
+    <button class="ghost small" id="toggleOpenBtn">—</button>
+    <span class="who"><span id="whoName"></span> · <a href="#" id="signOut"
+      style="color:var(--accent)">sign out</a></span>
+  </header>
+
+  <main>
+    <div id="noProject" class="banner" hidden></div>
+
+    <section id="newExam" class="card" hidden>
+      <h2 style="margin-bottom:16px">Create an exam</h2>
+      <div class="row">
+        <label class="field grow"><span>Title</span>
+          <input id="examTitle" placeholder="ECON 100A Midterm"></label>
+        <label class="field grow"><span>Allowed site</span>
+          <input id="examUrl" placeholder="https://…"></label>
+        <label class="field" style="flex:0 0 160px"><span>Join code</span>
+          <input id="examCode" class="mono" placeholder="MID24"></label>
+      </div>
+      <div class="row">
+        <button id="createExamBtn">Create</button>
+        <button class="ghost" id="cancelExamBtn">Cancel</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>Waiting for approval (<span id="pendingCount">0</span>)</h2>
+      <div id="queue" class="queue"></div>
+      <p id="queueEmpty" class="empty">Nobody is waiting. Students appear here the
+        moment they finish check-in.</p>
+    </section>
+
+    <section>
+      <h2>Live (<span id="liveCount">0</span>)</h2>
+      <div id="grid" class="grid"></div>
+      <p id="gridEmpty" class="empty">No approved students are running yet.</p>
+    </section>
+  </main>
+</div>
+
+<div id="overlay"><div class="sheet" id="sheet"></div></div>
+<div id="toast"></div>
+
+<script>
+// ===========================================================================
+// Configuration — paste your project's values here.
+// ===========================================================================
+const SUPABASE_URL      = "";   // e.g. "https://abcdefgh.supabase.co"
+const SUPABASE_ANON_KEY  = "";   // the "anon public" key, safe to publish
+const ID_EMAIL_DOMAIN    = "ucsd.edu";  // campus ID -> ID@domain, as the app does
+
+// How often the page refreshes. 3s matches the recorder's default tile interval;
+// polling rather than realtime keeps this a single file with no subscriptions to
+// leak, and one small query every 3s is nothing next to the images themselves.
+const REFRESH_MS = 3000;
+// A student whose heartbeat is older than this is shown as stale — laptop asleep,
+// app closed, or network gone.
+const STALE_MS = 20000;
+// Signed image URLs live slightly longer than one refresh, so a tile never shows
+// a broken image while the next URL is being minted.
+const SIGNED_TTL = 30;
+
+// ===========================================================================
+// Tiny Supabase REST client. Same three APIs the Python client uses.
+// ===========================================================================
+const store = {
+  get token() { return sessionStorage.getItem("li_token"); },
+  get refresh() { return sessionStorage.getItem("li_refresh"); },
+  set(tok, ref) {
+    // sessionStorage, not localStorage: a proctor's token should not outlive the
+    // browser tab on a shared podium machine.
+    if (tok) sessionStorage.setItem("li_token", tok);
+    if (ref) sessionStorage.setItem("li_refresh", ref);
+  },
+  clear() { sessionStorage.removeItem("li_token"); sessionStorage.removeItem("li_refresh"); },
+};
+
+let me = null;          // { id, email, full_name, role }
+let exams = [];
+let currentExam = null;
+let timer = null;
+let signedCache = new Map();   // storage path -> { url, until }
+
+function api(path) { return SUPABASE_URL.replace(/\/$/, "") + path; }
+
+async function call(path, { method = "GET", body, headers = {}, auth = true,
+                            raw = false } = {}) {
+  const head = { apikey: SUPABASE_ANON_KEY, ...headers };
+  if (auth) head.Authorization = "Bearer " + (store.token || SUPABASE_ANON_KEY);
+  if (body !== undefined && !(body instanceof Blob)) {
+    head["Content-Type"] = "application/json";
+    body = JSON.stringify(body);
+  }
+  let res = await fetch(api(path), { method, headers: head, body });
+
+  if (res.status === 401 && auth && store.refresh) {
+    if (await refreshToken()) {
+      head.Authorization = "Bearer " + store.token;
+      res = await fetch(api(path), { method, headers: head, body });
+    }
+  }
+  if (!res.ok) {
+    let detail = await res.text();
+    try { const j = JSON.parse(detail); detail = j.message || j.msg || j.error || detail; }
+    catch (_) {}
+    throw new Error(detail || ("HTTP " + res.status));
+  }
+  if (raw) return res;
+  const text = await res.text();
+  return text ? JSON.parse(text) : null;
+}
+
+async function refreshToken() {
+  try {
+    const data = await call("/auth/v1/token?grant_type=refresh_token", {
+      method: "POST", auth: false,
+      headers: { Authorization: "Bearer " + SUPABASE_ANON_KEY },
+      body: { refresh_token: store.refresh },
+    });
+    if (!data || !data.access_token) return false;
+    store.set(data.access_token, data.refresh_token);
+    return true;
+  } catch (_) { return false; }
+}
+
+// A short-lived signed URL for a private storage object, cached so a 3-second
+// refresh does not mint a new URL for every tile on every tick.
+async function signedUrl(bucket, path) {
+  if (!path) return null;
+  const key = bucket + "/" + path;
+  const hit = signedCache.get(key);
+  if (hit && hit.until > Date.now()) return hit.url;
+  try {
+    const data = await call(`/storage/v1/object/sign/${bucket}/${encodeURI(path)}`, {
+      method: "POST", body: { expiresIn: SIGNED_TTL },
+    });
+    const url = api("/storage/v1" + data.signedURL.replace(/^\/?storage\/v1/, ""));
+    signedCache.set(key, { url, until: Date.now() + (SIGNED_TTL - 5) * 1000 });
+    return url;
+  } catch (_) { return null; }
+}
+
+// ===========================================================================
+// UI helpers
+// ===========================================================================
+const $ = (id) => document.getElementById(id);
+
+function toast(message, bad = false) {
+  const box = $("toast");
+  box.textContent = message;
+  box.className = "on" + (bad ? " bad" : "");
+  clearTimeout(box._t);
+  box._t = setTimeout(() => (box.className = ""), bad ? 6000 : 3000);
+}
+
+function ago(iso) {
+  if (!iso) return "never";
+  const ms = Date.now() - new Date(iso).getTime();
+  if (ms < 1500) return "now";
+  if (ms < 60000) return Math.round(ms / 1000) + "s ago";
+  if (ms < 3600000) return Math.round(ms / 60000) + "m ago";
+  return Math.round(ms / 3600000) + "h ago";
+}
+
+function escapeHtml(text) {
+  return String(text ?? "").replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+// ===========================================================================
+// Auth
+// ===========================================================================
+async function signIn() {
+  const raw = $("loginId").value.trim();
+  const password = $("loginPw").value;
+  if (!raw || !password) return toast("Enter your ID and password.", true);
+  const email = raw.includes("@") ? raw.toLowerCase()
+                                  : `${raw}@${ID_EMAIL_DOMAIN}`.toLowerCase();
+  $("loginBtn").disabled = true;
+  try {
+    const data = await call("/auth/v1/token?grant_type=password", {
+      method: "POST", auth: false,
+      headers: { Authorization: "Bearer " + SUPABASE_ANON_KEY },
+      body: { email, password },
+    });
+    store.set(data.access_token, data.refresh_token);
+    await boot();
+  } catch (error) {
+    toast("Sign-in failed: " + error.message, true);
+  } finally {
+    $("loginBtn").disabled = false;
+  }
+}
+
+function signOut() {
+  store.clear();
+  clearInterval(timer);
+  me = null;
+  location.reload();
+}
+
+async function loadMe() {
+  const rows = await call("/rest/v1/profiles?select=id,role,full_name,campus_id&limit=1");
+  if (!rows || !rows.length) throw new Error("no profile row for this account");
+  return rows[0];
+}
+
+// ===========================================================================
+// Exams
+// ===========================================================================
+async function loadExams() {
+  exams = await call("/rest/v1/exams?select=*&order=created_at.desc") || [];
+  const pick = $("examPick");
+  pick.innerHTML = "";
+  if (!exams.length) {
+    pick.innerHTML = `<option value="">no exams yet — create one</option>`;
+    currentExam = null;
+  } else {
+    for (const exam of exams) {
+      const option = document.createElement("option");
+      option.value = exam.id;
+      option.textContent = `${exam.title} · ${exam.join_code}` +
+                           (exam.is_open ? "" : " (closed)");
+      pick.appendChild(option);
+    }
+    const keep = currentExam && exams.find((e) => e.id === currentExam.id);
+    currentExam = keep || exams[0];
+    pick.value = currentExam.id;
+  }
+  paintOpenButton();
+}
+
+function paintOpenButton() {
+  const button = $("toggleOpenBtn");
+  if (!currentExam) { button.hidden = true; return; }
+  button.hidden = false;
+  button.textContent = currentExam.is_open ? "Close the door" : "Open the door";
+  button.title = currentExam.is_open
+    ? "Stop new students joining. Already-approved sessions keep running."
+    : "Let students join with the code again.";
+}
+
+async function createExam() {
+  const title = $("examTitle").value.trim();
+  const url = $("examUrl").value.trim();
+  const code = $("examCode").value.trim().toUpperCase();
+  if (!title || !url || !code) return toast("Title, site and join code are all needed.", true);
+  if (!/^https?:\/\//i.test(url)) return toast("The allowed site must start with http:// or https://", true);
+  try {
+    const rows = await call("/rest/v1/exams", {
+      method: "POST",
+      headers: { Prefer: "return=representation" },
+      body: { faculty_id: me.id, title, allowed_url: url, join_code: code, is_open: true },
+    });
+    currentExam = rows[0];
+    $("newExam").hidden = true;
+    $("examTitle").value = $("examUrl").value = $("examCode").value = "";
+    await loadExams();
+    $("examPick").value = currentExam.id;
+    toast(`Created. Read out the code: ${currentExam.join_code}`);
+    refresh();
+  } catch (error) {
+    // The unique constraint on join_code is the usual cause here.
+    toast("Could not create it: " + error.message, true);
+  }
+}
+
+async function toggleOpen() {
+  if (!currentExam) return;
+  try {
+    const rows = await call(`/rest/v1/exams?id=eq.${currentExam.id}`, {
+      method: "PATCH", headers: { Prefer: "return=representation" },
+      body: { is_open: !currentExam.is_open },
+    });
+    currentExam = rows[0];
+    paintOpenButton();
+    await loadExams();
+    toast(currentExam.is_open ? "Students can join again." : "The door is closed.");
+  } catch (error) { toast(error.message, true); }
+}
+
+// ===========================================================================
+// Sessions: the approval queue and the live grid
+// ===========================================================================
+async function loadSessions() {
+  if (!currentExam) return [];
+  // One request for the sessions, joined to the student's profile so the queue can
+  // show a real name next to the photographed ID.
+  const select = "*,profiles!sessions_student_id_fkey(full_name,campus_id)";
+  return await call(
+    `/rest/v1/sessions?select=${encodeURIComponent(select)}` +
+    `&exam_id=eq.${currentExam.id}&order=requested_at.asc`) || [];
+}
+
+async function loadFrames(sessionIds) {
+  if (!sessionIds.length) return {};
+  const list = `(${sessionIds.join(",")})`;
+  const rows = await call(
+    `/rest/v1/live_frames?select=*&session_id=in.${encodeURIComponent(list)}`) || [];
+  const bySession = {};
+  for (const row of rows) {
+    (bySession[row.session_id] ||= {})[row.kind] = row;
+  }
+  return bySession;
+}
+
+async function decide(sessionId, approve) {
+  let reason = null;
+  if (!approve) {
+    reason = prompt("Why are you refusing this student?\n" +
+                    "They will see exactly this text.", "The ID photo is not readable");
+    if (reason === null) return;
+  }
+  try {
+    await call(`/rest/v1/sessions?id=eq.${sessionId}`, {
+      method: "PATCH", headers: { Prefer: "return=minimal" },
+      body: approve ? { status: "approved" }
+                    : { status: "rejected", reject_reason: reason || "not admitted" },
+    });
+    toast(approve ? "Approved — their exam starts by itself."
+                  : "Refused. They have been told why.");
+    refresh();
+  } catch (error) { toast("That did not go through: " + error.message, true); }
+}
+
+async function resetSession(sessionId) {
+  if (!confirm("Delete this student's session so they can check in again?\n\n" +
+               "Their ID photo and check-in photo go with it.")) return;
+  try {
+    await call(`/rest/v1/sessions?id=eq.${sessionId}`, { method: "DELETE" });
+    toast("Reset. They can run the check-in again.");
+    refresh();
+  } catch (error) { toast(error.message, true); }
+}
+
+function nameOf(session) {
+  const profile = session.profiles || {};
+  return profile.full_name || profile.campus_id || "unknown student";
+}
+
+async function paintQueue(sessions) {
+  const waiting = sessions.filter((s) => s.status === "pending");
+  const rejected = sessions.filter((s) => s.status === "rejected");
+  $("pendingCount").textContent = waiting.length;
+  $("queueEmpty").hidden = waiting.length > 0 || rejected.length > 0;
+
+  const queue = $("queue");
+  queue.innerHTML = "";
+
+  for (const session of waiting) {
+    const profile = session.profiles || {};
+    const [idUrl, selfieUrl] = await Promise.all([
+      signedUrl("identity", session.id_photo_path),
+      signedUrl("identity", session.selfie_path),
+    ]);
+    const card = document.createElement("div");
+    card.className = "pending";
+    card.innerHTML = `
+      <div class="photos">
+        <figure><img alt="student ID" src="${idUrl || ""}"
+          onclick="zoom('${idUrl || ""}')"><figcaption>student ID</figcaption></figure>
+        <figure><img alt="check-in photo" src="${selfieUrl || ""}"
+          onclick="zoom('${selfieUrl || ""}')"><figcaption>in person</figcaption></figure>
+      </div>
+      <div class="meta">
+        <div class="name">${escapeHtml(nameOf(session))}</div>
+        <div class="sub">${escapeHtml(profile.campus_id || "no ID on file")}</div>
+        <div class="sub">${escapeHtml(session.machine || "unknown machine")}</div>
+        <div class="sub">asked ${ago(session.requested_at)}</div>
+        ${session.consent_at ? "" :
+          `<div class="flag warn">did not record consent</div>`}
+        ${session.id_photo_path && session.selfie_path ? "" :
+          `<div class="flag warn">photos missing</div>`}
+      </div>
+      <div class="acts">
+        <button class="small" onclick="decide('${session.id}', true)">Approve</button>
+        <button class="small bad" onclick="decide('${session.id}', false)">Refuse</button>
+      </div>`;
+    queue.appendChild(card);
+  }
+
+  for (const session of rejected) {
+    const card = document.createElement("div");
+    card.className = "pending";
+    card.innerHTML = `
+      <div class="meta">
+        <div class="name">${escapeHtml(nameOf(session))}</div>
+        <div class="sub" style="color:var(--danger)">refused ${ago(session.decided_at)}</div>
+        <div class="sub">${escapeHtml(session.reject_reason || "")}</div>
+      </div>
+      <div class="acts">
+        <button class="small ghost" onclick="resetSession('${session.id}')">
+          Let them try again</button>
+      </div>`;
+    queue.appendChild(card);
+  }
+}
+
+async function paintGrid(sessions) {
+  const live = sessions.filter((s) => ["approved", "active"].includes(s.status));
+  $("liveCount").textContent = live.length;
+  $("gridEmpty").hidden = live.length > 0;
+
+  const frames = await loadFrames(live.map((s) => s.id));
+  const grid = $("grid");
+  grid.innerHTML = "";
+
+  for (const session of live) {
+    const mine = frames[session.id] || {};
+    const [screenUrl, camUrl] = await Promise.all([
+      signedUrl("live", mine.screen?.storage_path),
+      signedUrl("live", mine.camera?.storage_path),
+    ]);
+    const beat = session.heartbeat_at ? Date.now() - new Date(session.heartbeat_at).getTime()
+                                      : Infinity;
+    const stale = beat > STALE_MS;
+
+    const tile = document.createElement("div");
+    tile.className = "tile" + (stale ? " stale" : "");
+    tile.onclick = () => openDetail(session.id);
+    tile.innerHTML = `
+      <div class="screen">
+        ${screenUrl ? `<img alt="screen" src="${screenUrl}">`
+                    : `<div class="empty" style="padding:22px;text-align:center">
+                         ${session.status === "approved"
+                            ? "approved — waiting for the lockdown to start"
+                            : "no screen yet"}</div>`}
+        ${camUrl ? `<img class="cam" alt="webcam" src="${camUrl}">` : ""}
+      </div>
+      <div class="bar">
+        <span class="nm">${escapeHtml(nameOf(session))}</span>
+        <span class="age">${stale ? "stale · " : ""}${ago(session.heartbeat_at)}</span>
+      </div>`;
+    grid.appendChild(tile);
+  }
+}
+
+// ===========================================================================
+// One student, in detail
+// ===========================================================================
+async function openDetail(sessionId) {
+  const select = "*,profiles!sessions_student_id_fkey(full_name,campus_id)";
+  const rows = await call(
+    `/rest/v1/sessions?select=${encodeURIComponent(select)}&id=eq.${sessionId}&limit=1`);
+  if (!rows || !rows.length) return;
+  const session = rows[0];
+  const events = await call(
+    `/rest/v1/events?select=*&session_id=eq.${sessionId}&order=at.desc&limit=60`) || [];
+  const frames = (await loadFrames([sessionId]))[sessionId] || {};
+  const [screenUrl, camUrl, idUrl, selfieUrl] = await Promise.all([
+    signedUrl("live", frames.screen?.storage_path),
+    signedUrl("live", frames.camera?.storage_path),
+    signedUrl("identity", session.id_photo_path),
+    signedUrl("identity", session.selfie_path),
+  ]);
+
+  $("sheet").innerHTML = `
+    <div class="row" style="margin-bottom:16px">
+      <div>
+        <div style="font-size:20px;font-weight:700">${escapeHtml(nameOf(session))}</div>
+        <div style="color:var(--muted);font-size:13px">
+          ${escapeHtml(session.profiles?.campus_id || "")} ·
+          ${escapeHtml(session.status)} · last seen ${ago(session.heartbeat_at)}</div>
+      </div>
+      <div style="margin-left:auto" class="row">
+        ${session.status === "active" || session.status === "approved"
+          ? `<button class="bad small" onclick="endSession('${session.id}')">
+               End this session</button>` : ""}
+        <button class="ghost small" onclick="closeDetail()">Close</button>
+      </div>
+    </div>
+    <div class="two">
+      <div>
+        ${screenUrl ? `<img class="big" src="${screenUrl}" alt="screen">`
+                    : `<p class="empty">No screen frame yet.</p>`}
+        <div class="row" style="margin-top:12px">
+          ${camUrl ? `<img class="big" style="max-width:260px" src="${camUrl}" alt="webcam">` : ""}
+          ${idUrl ? `<img class="big" style="max-width:200px" src="${idUrl}"
+                      alt="student ID" onclick="zoom('${idUrl}')">` : ""}
+          ${selfieUrl ? `<img class="big" style="max-width:200px" src="${selfieUrl}"
+                      alt="check-in photo" onclick="zoom('${selfieUrl}')">` : ""}
+        </div>
+      </div>
+      <div>
+        <h2>Timeline</h2>
+        <div class="events">
+          ${events.length ? events.map((e) => `
+            <div><span class="t">${new Date(e.at).toLocaleTimeString()}</span>
+              <span><b>${escapeHtml(e.kind)}</b>
+              ${e.detail ? "<br>" + escapeHtml(e.detail) : ""}</span></div>`).join("")
+            : `<p class="empty">Nothing logged yet.</p>`}
+        </div>
+      </div>
+    </div>`;
+  $("overlay").classList.add("on");
+}
+
+function closeDetail() { $("overlay").classList.remove("on"); }
+
+function zoom(url) {
+  if (!url) return;
+  window.open(url, "_blank", "noopener");
+}
+
+async function endSession(sessionId) {
+  if (!confirm("End this student's session?\n\n" +
+               "Their lockdown will stop uploading, but it does not unlock their " +
+               "machine — they still need the passcode for that.")) return;
+  try {
+    await call(`/rest/v1/sessions?id=eq.${sessionId}`, {
+      method: "PATCH", headers: { Prefer: "return=minimal" },
+      body: { status: "ended", ended_at: new Date().toISOString() },
+    });
+    closeDetail();
+    toast("Session marked ended.");
+    refresh();
+  } catch (error) { toast(error.message, true); }
+}
+
+// ===========================================================================
+// The refresh loop
+// ===========================================================================
+let refreshing = false;
+async function refresh() {
+  if (refreshing || !me || !currentExam) return;
+  refreshing = true;
+  try {
+    const sessions = await loadSessions();
+    await paintQueue(sessions);
+    await paintGrid(sessions);
+  } catch (error) {
+    // Shown once per failure rather than silently: a proctor needs to know the
+    // grid has gone stale, not stare at frozen thumbnails.
+    toast("Refresh failed: " + error.message, true);
+  } finally {
+    refreshing = false;
+  }
+}
+
+// ===========================================================================
+// Boot
+// ===========================================================================
+async function boot() {
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+    $("login").hidden = false;
+    $("loginNote").innerHTML =
+      "This page has no project configured yet. Open it in an editor and set " +
+      "<code>SUPABASE_URL</code> and <code>SUPABASE_ANON_KEY</code> at the top of " +
+      "the script, from Supabase &gt; Project Settings &gt; API.";
+    $("loginBtn").disabled = true;
+    return;
+  }
+  if (!store.token) { $("login").hidden = false; return; }
+
+  try {
+    me = await loadMe();
+  } catch (_) {
+    store.clear();
+    $("login").hidden = false;
+    return;
+  }
+  if (me.role !== "faculty") {
+    $("login").hidden = false;
+    $("loginNote").textContent =
+      "That account is a student account. A proctor account has to be promoted in " +
+      "the database first: update public.profiles set role = 'faculty' where " +
+      "campus_id = '…';";
+    store.clear();
+    return;
+  }
+
+  $("login").hidden = true;
+  $("app").hidden = false;
+  $("whoName").textContent = me.full_name || me.campus_id || "proctor";
+
+  await loadExams();
+  if (!exams.length) $("newExam").hidden = false;
+  refresh();
+  clearInterval(timer);
+  timer = setInterval(refresh, REFRESH_MS);
+}
+
+$("loginBtn").onclick = signIn;
+$("loginPw").onkeydown = (e) => { if (e.key === "Enter") signIn(); };
+$("loginId").onkeydown = (e) => { if (e.key === "Enter") signIn(); };
+$("signOut").onclick = (e) => { e.preventDefault(); signOut(); };
+$("newExamBtn").onclick = () => { $("newExam").hidden = !$("newExam").hidden; };
+$("cancelExamBtn").onclick = () => { $("newExam").hidden = true; };
+$("createExamBtn").onclick = createExam;
+$("toggleOpenBtn").onclick = toggleOpen;
+$("examPick").onchange = (e) => {
+  currentExam = exams.find((x) => x.id === e.target.value) || null;
+  paintOpenButton();
+  signedCache.clear();
+  refresh();
+};
+$("overlay").onclick = (e) => { if (e.target.id === "overlay") closeDetail(); };
+document.onkeydown = (e) => { if (e.key === "Escape") closeDetail(); };
+
+// Stop hammering the project while the tab is in the background.
+document.addEventListener("visibilitychange", () => {
+  clearInterval(timer);
+  if (!document.hidden && me) { refresh(); timer = setInterval(refresh, REFRESH_MS); }
+});
+
+boot();
+</script>
+</body>
+</html>

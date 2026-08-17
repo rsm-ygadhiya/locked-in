@@ -3,8 +3,11 @@
 # guided-access.command  —  a Chrome "Guided Access" / single-site lockdown for macOS
 #
 # What it does:
+#   0. If this Mac is set up for proctored exams, runs the check-in first
+#      (student_session.py): sign in, join code, consent, photograph the student ID,
+#      then wait for a proctor to approve. Nothing below happens without approval.
 #   1. Shows the recording notice and waits for the student to agree (nothing below
-#      this point happens if they decline)
+#      this point happens if they decline; skipped when the check-in already got it)
 #   2. Starts recording the screen, the webcam, and the microphone (recorder.py)
 #   3. Locks Chrome via managed policy: incognito OFF, DevTools OFF, only the
 #      allowed sites reachable (this layer even applies inside incognito)
@@ -47,11 +50,19 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # clone of the repo they are at the top level, one directory up from macos/.
 RECORDER=""
 CONFIG_PY=""
+CHECKIN_PY=""
+UPLOADER_PY=""
 for candidate in "$SCRIPT_DIR/recorder.py" "$SCRIPT_DIR/../recorder.py"; do
 	if [[ -f "$candidate" ]]; then RECORDER="$candidate"; break; fi
 done
 for candidate in "$SCRIPT_DIR/lockedin_config.py" "$SCRIPT_DIR/../lockedin_config.py"; do
 	if [[ -f "$candidate" ]]; then CONFIG_PY="$candidate"; break; fi
+done
+for candidate in "$SCRIPT_DIR/student_session.py" "$SCRIPT_DIR/../student_session.py"; do
+	if [[ -f "$candidate" ]]; then CHECKIN_PY="$candidate"; break; fi
+done
+for candidate in "$SCRIPT_DIR/uploader.py" "$SCRIPT_DIR/../uploader.py"; do
+	if [[ -f "$candidate" ]]; then UPLOADER_PY="$candidate"; break; fi
 done
 
 # uv reads the dependency block inside recorder.py and installs them on first run, so
@@ -68,6 +79,14 @@ done
 if [[ ${#PY_RUNNER[@]} -eq 0 ]] && command -v python3 >/dev/null 2>&1; then
 	PY_RUNNER=("$(command -v python3)")
 fi
+
+# A plain interpreter as well as the runner. `uv run --script` needs a file, so it
+# cannot read a snippet from stdin, and reading one JSON field is not worth a whole
+# extra helper file. Anything with a standard library will do here.
+PLAIN_PY=""
+for py in "$(command -v python3 2>/dev/null)" "/opt/homebrew/bin/python3" "/usr/local/bin/python3" "/usr/bin/python3"; do
+	if [[ -n "$py" && -x "$py" ]]; then PLAIN_PY="$py"; break; fi
+done
 
 # ---------- Read the settings ----------
 # The settings file holds the passcode hash, so there is no safe way to carry on
@@ -102,10 +121,72 @@ if [[ -z "$ALLOWED_URL" || ${#ALLOW_HOSTS[@]} -eq 0 ]]; then
 Open the admin panel (Admin button on the launcher) and check the allowed URL and hosts." buttons {"OK"} default button "OK" with title "Locked In" with icon stop' >/dev/null 2>&1
 	exit 1
 fi
-echo "Allowed site: $ALLOWED_URL"
-
 SESSION_DIR="$RECORD_DIR/$(date +%Y%m%d-%H%M%S)"
 REC_PID=""
+UPLOAD_PID=""
+PROCTORED=false
+LIVE_SESSION_ID=""
+
+# ---------- Proctored check-in ----------
+# When a Supabase project is configured, a student cannot get into the lockdown by
+# themselves: student_session.py signs them in, photographs their ID, and waits for
+# a proctor to approve them. It exits non-zero if that does not happen, and this
+# script stops there — before the admin prompt, before any policy is written, so a
+# student who was not admitted leaves with their Mac untouched.
+#
+# With no project configured, everything below is skipped and this behaves exactly
+# as it always did: a local, standalone lockdown.
+if "${PY_RUNNER[@]}" "$CONFIG_PY" cloud-enabled >/dev/null 2>&1; then
+	if [[ -z "$CHECKIN_PY" ]]; then
+		echo "This machine is set up for proctored exams but student_session.py is missing."
+		osascript -e 'display dialog "This Mac is configured for proctored exams, but student_session.py is missing next to the lockdown script.
+
+Reinstall Locked In, or clear the Supabase settings in the admin panel to run it standalone." buttons {"OK"} default button "OK" with title "Locked In" with icon stop' >/dev/null 2>&1
+		exit 1
+	fi
+
+	mkdir -p "$SESSION_DIR"
+	echo "Opening check-in (sign in, photograph your ID, wait for your proctor)..."
+	if ! "${PY_RUNNER[@]}" "$CHECKIN_PY" --session-dir "$SESSION_DIR"; then
+		echo "Check-in was not completed — the exam was not started, and nothing on this Mac was changed."
+		# An empty session folder is just noise on the Desktop.
+		rmdir "$SESSION_DIR" 2>/dev/null
+		exit 1
+	fi
+
+	HANDOFF="$SESSION_DIR/handoff.json"
+	if [[ ! -f "$HANDOFF" ]]; then
+		echo "Check-in finished but left no approval on disk. Not starting the exam."
+		exit 1
+	fi
+
+	# One short Python call rather than a pile of sed: the handoff is JSON, and the
+	# allowed URL can contain characters that would need escaping anyway.
+	LIVE_SESSION_ID=""
+	EXAM_URL=""
+	if [[ -n "$PLAIN_PY" ]]; then
+		read -r LIVE_SESSION_ID EXAM_URL < <(
+			"$PLAIN_PY" -c '
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    data = json.load(handle)
+print(data.get("session_id", ""), data.get("allowed_url", ""))
+' "$HANDOFF" 2>/dev/null
+		)
+	fi
+	if [[ -z "$LIVE_SESSION_ID" || -z "$EXAM_URL" ]]; then
+		echo "The approval file was unreadable. Not starting the exam."
+		exit 1
+	fi
+	# The exam decides the allowed site, not this laptop's local settings.
+	ALLOWED_URL="$EXAM_URL"
+	EXAM_HOST="$(printf '%s' "$ALLOWED_URL" | sed -E 's#^[a-zA-Z]+://([^/]+).*#\1#')"
+	[[ -n "$EXAM_HOST" ]] && ALLOW_HOSTS+=("$EXAM_HOST")
+	PROCTORED=true
+	echo "Approved. Session $LIVE_SESSION_ID"
+fi
+
+echo "Allowed site: $ALLOWED_URL"
 
 # ---------- Recording notice + consent ----------
 # This runs before the admin prompt and before any lockdown, so declining leaves the
@@ -119,7 +200,10 @@ recording_summary() {
 }
 
 if [[ "$RECORD_SCREEN" == true || "$RECORD_CAMERA" == true || "$RECORD_AUDIO" == true ]]; then
-	if [[ "$REQUIRE_CONSENT" == true ]]; then
+	# A proctored student already read the consent text and ticked the box during
+	# check-in; asking a second time in a different dialog just trains people to
+	# click through notices.
+	if [[ "$REQUIRE_CONSENT" == true && "$PROCTORED" != true ]]; then
 		NOTICE="This session will be RECORDED.
 
 The following are captured for the whole session:
@@ -146,6 +230,9 @@ agree, click Cancel — nothing is recorded and nothing on this Mac is changed."
 		[[ "$RECORD_SCREEN" != true ]] && REC_FLAGS+=("--no-screen")
 		[[ "$RECORD_CAMERA" != true ]] && REC_FLAGS+=("--no-camera")
 		[[ "$RECORD_AUDIO"  != true ]] && REC_FLAGS+=("--no-audio")
+		# In a proctored exam the recorder also keeps two small JPEGs current for
+		# uploader.py to publish to the proctor's dashboard.
+		[[ "$PROCTORED" == true ]] && REC_FLAGS+=("--live-tiles")
 		mkdir -p "$SESSION_DIR"
 		echo "Starting the recording (first run installs the Python packages, ~30s)..."
 		"${PY_RUNNER[@]}" "$RECORDER" --out-dir "$SESSION_DIR" "${REC_FLAGS[@]}" \
@@ -169,6 +256,30 @@ See recorder.log in the session folder." buttons {"Continue anyway"} default but
 	fi
 fi
 
+# ---------- Start the live feed to the proctor ----------
+# Separate process from the recorder on purpose: the camera can only be held by one
+# process, and a stalled upload must never cost frames of the exam recording. If
+# this dies, the recording carries on and the dashboard simply shows the student as
+# stale.
+if [[ "$PROCTORED" == true && -n "$UPLOADER_PY" && -n "$REC_PID" ]]; then
+	"${PY_RUNNER[@]}" "$UPLOADER_PY" \
+		--session-dir "$SESSION_DIR" \
+		--session-id "$LIVE_SESSION_ID" \
+		--token-file "$SESSION_DIR/token.json" \
+		>"$SESSION_DIR/uploader.log" 2>&1 &
+	UPLOAD_PID=$!
+	sleep 1
+	if ! kill -0 "$UPLOAD_PID" 2>/dev/null; then
+		UPLOAD_PID=""
+		echo "WARNING: the live feed to your proctor could not start. The exam is still"
+		echo "         being recorded locally. Details in uploader.log."
+	else
+		echo "Live feed to the proctor: on"
+	fi
+elif [[ "$PROCTORED" == true && -z "$REC_PID" ]]; then
+	echo "WARNING: nothing is being recorded, so there is no live feed either."
+fi
+
 # Don't let the Mac sleep mid-session and cut the recording short. -w makes caffeinate
 # exit by itself as soon as this script does.
 caffeinate -dimsu -w $$ >/dev/null 2>&1 &
@@ -188,11 +299,36 @@ stop_recording() {
 	REC_PID=""
 }
 
+# The uploader is signalled rather than left to notice the STOP file: the recorder
+# deletes that file when it finishes, so whichever of the two looks second might
+# never see it.
+stop_uploading() {
+	[[ -z "$UPLOAD_PID" ]] && return
+	kill -INT "$UPLOAD_PID" 2>/dev/null
+	local waited=0
+	while kill -0 "$UPLOAD_PID" 2>/dev/null && (( waited < 100 )); do
+		sleep 0.1
+		waited=$((waited + 1))
+	done
+	kill -9 "$UPLOAD_PID" 2>/dev/null
+	UPLOAD_PID=""
+}
+
+# The token file is the student's credential for the whole session. uploader.py
+# deletes it as soon as it has read it; this is the safety net for the paths where
+# the uploader never ran.
+scrub_token() {
+	rm -f "$SESSION_DIR/token.json" 2>/dev/null
+}
+
 # ---------- Get admin rights for the Chrome policy ----------
 echo "Guided Access needs your admin password to lock Chrome (disable incognito + DevTools)..."
 if ! sudo -v; then
 	echo "No admin password provided — cannot lock Chrome settings. Exiting."
+	# The EXIT trap is not installed yet, so unwind by hand.
+	stop_uploading
 	stop_recording
+	scrub_token
 	exit 1
 fi
 # Keep the sudo timestamp alive so cleanup works after a long session.
@@ -209,7 +345,11 @@ remove_policy() {
 
 # ALWAYS undo everything on exit, even on crash / Ctrl+C.
 cleanup() {
+	# Uploader first: it needs the live tiles to still exist to publish a last frame,
+	# and it is what marks the session ended for the proctor.
+	stop_uploading
 	stop_recording
+	scrub_token
 	remove_policy
 	kill "$KEEPALIVE_PID" 2>/dev/null
 	killall "Google Chrome" 2>/dev/null

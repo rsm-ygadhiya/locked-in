@@ -19,6 +19,16 @@ session and stop it on exit; it writes three files into one session folder:
     <out-dir>/camera.mp4      the webcam
     <out-dir>/audio.wav       the microphone
 
+With --live-tiles it also keeps two small JPEGs up to date, overwritten in place:
+
+    <out-dir>/live/screen.jpg  newest screen frame, downscaled
+    <out-dir>/live/camera.jpg  newest webcam frame, downscaled
+
+That is how proctored sessions feed the faculty dashboard: uploader.py ships those
+two files to Supabase every few seconds. The split exists because only one process
+can open the webcam, and because an upload stalling on a bad network must not cost
+frames of the recording.
+
 Audio is a separate file on purpose — muxing it into the video would mean depending
 on ffmpeg, and the whole point of this script is that a student machine needs nothing
 but Python. Both video files carry a burnt-in timestamp, and both are written on a
@@ -121,7 +131,64 @@ class WallClock:
         return self.written / self.fps if self.fps else 0.0
 
 
-def record_screen(out_dir: Path, fps: float, max_width: int) -> None:
+class LiveTile:
+    """
+    Publish the newest frame of one stream as a small JPEG, for the uploader.
+
+    Why a file on disk rather than uploading from here: only one process can hold
+    the webcam open, so an uploader cannot capture its own tiles — it has to be
+    handed them. And the upload must never be in the capture loop's way, because a
+    stalled network would then cost frames of the actual exam footage. So the loop
+    drops a file and forgets about it; uploader.py picks it up, and if it is
+    offline the recording carries on regardless.
+
+    Writes go to a temp name and are then renamed over the target, so a reader
+    always sees a complete JPEG rather than a half-written one.
+    """
+
+    def __init__(self, out_dir: Path, kind: str, *, interval: float, width: int,
+                 enabled: bool):
+        self.kind = kind
+        self.interval = max(0.5, interval)
+        self.width = max(160, width)
+        self.enabled = enabled
+        self.directory = out_dir / "live"
+        self.path = self.directory / f"{kind}.jpg"
+        self.temp = self.directory / f".{kind}.jpg.tmp"
+        self.due = 0.0
+        if self.enabled:
+            self.directory.mkdir(parents=True, exist_ok=True)
+
+    def offer(self, frame) -> None:
+        """Take this frame if one is due. Cheap and silent when it is not."""
+        if not self.enabled:
+            return
+        now = time.monotonic()
+        if now < self.due:
+            return
+        self.due = now + self.interval
+        try:
+            import cv2
+            height, width = frame.shape[:2]
+            scale = min(1.0, self.width / width)
+            if scale < 1.0:
+                frame = cv2.resize(frame, (int(width * scale), int(height * scale)),
+                                   interpolation=cv2.INTER_AREA)
+            ok, buffer = cv2.imencode(".jpg", frame,
+                                      [int(cv2.IMWRITE_JPEG_QUALITY), 65])
+            if not ok:
+                return
+            self.temp.write_bytes(buffer.tobytes())
+            os.replace(self.temp, self.path)
+        except Exception as exc:                  # noqa: BLE001 - monitoring is optional
+            # Deliberately swallowed: live monitoring is a convenience, and nothing
+            # here is worth interrupting a recording for.
+            log(f"live[{self.kind}]: {exc}")
+            self.enabled = False
+
+
+def record_screen(out_dir: Path, fps: float, max_width: int,
+                  tile: LiveTile | None = None) -> None:
     """Capture the primary display until STOP."""
     import cv2
     import mss
@@ -157,6 +224,9 @@ def record_screen(out_dir: Path, fps: float, max_width: int) -> None:
                 for _ in range(owed):
                     writer.write(frame)
                 clock.credit(owed)
+
+                if tile is not None:
+                    tile.offer(frame)
 
                 # Yield briefly; the wall clock above absorbs any overshoot.
                 STOP.wait(max(0.0, (1.0 / fps) * 0.5))
@@ -257,7 +327,8 @@ def open_camera(preferred: int):
     return None, None
 
 
-def record_camera(out_dir: Path, fps: float, index: int) -> None:
+def record_camera(out_dir: Path, fps: float, index: int,
+                  tile: LiveTile | None = None) -> None:
     """Capture the webcam until STOP."""
     import cv2
 
@@ -299,6 +370,9 @@ def record_camera(out_dir: Path, fps: float, index: int) -> None:
             for _ in range(owed):
                 writer.write(stamped)
             clock.credit(owed)
+
+            if tile is not None:
+                tile.offer(stamped)
 
             STOP.wait(max(0.0, (1.0 / fps) * 0.5))
     finally:
@@ -391,6 +465,12 @@ def main() -> int:
                        help="which camera to use (default 0)")
     parser.add_argument("--audio-rate", type=int, default=44100,
                        help="microphone sample rate (default 44100)")
+    parser.add_argument("--live-tiles", action="store_true",
+                       help="also drop small JPEGs in <out-dir>/live for uploader.py")
+    parser.add_argument("--live-interval", type=float, default=3.0,
+                       help="seconds between live tiles (default 3)")
+    parser.add_argument("--live-width", type=int, default=640,
+                       help="live tile width in pixels (default 640)")
     args = parser.parse_args()
 
     out_dir = Path(args.out_dir).expanduser()
@@ -408,12 +488,18 @@ def main() -> int:
     workers: list[threading.Thread] = [
         threading.Thread(target=watch_stop_file, args=(stop_file,), daemon=True)
     ]
+    def tile(kind: str) -> LiveTile:
+        return LiveTile(out_dir, kind, interval=args.live_interval,
+                        width=args.live_width, enabled=args.live_tiles)
+
     if not args.no_screen:
         workers.append(threading.Thread(
-            target=record_screen, args=(out_dir, args.screen_fps, args.max_width)))
+            target=record_screen,
+            args=(out_dir, args.screen_fps, args.max_width, tile("screen"))))
     if not args.no_camera:
         workers.append(threading.Thread(
-            target=record_camera, args=(out_dir, args.camera_fps, args.camera_index)))
+            target=record_camera,
+            args=(out_dir, args.camera_fps, args.camera_index, tile("camera"))))
     if not args.no_audio:
         workers.append(threading.Thread(
             target=record_audio, args=(out_dir, args.audio_rate)))

@@ -20,6 +20,13 @@ screen.mp4
 camera.mp4
 audio.wav
 
+# a proctored session's working files: token.json is a live access token, and the
+# live/ tiles are frames of somebody's screen
+token.json
+handoff.json
+live/
+*.jpg
+
 # python
 __pycache__/
 *.pyc

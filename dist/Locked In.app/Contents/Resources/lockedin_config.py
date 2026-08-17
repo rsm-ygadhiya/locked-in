@@ -14,6 +14,8 @@ top of guided-access.command / guided-access.ps1:
     admin            username + PBKDF2 hash of the admin-panel password
     passcode         PBKDF2 hash of the unlock passcode
     recording        which of screen / camera / audio to capture
+    cloud            the Supabase project behind the Student / Faculty flow;
+                     empty means this machine runs standalone, as it always did
 
 Neither password is stored — only a PBKDF2-HMAC-SHA256 hash with a random 16-byte salt
 and 200,000 iterations. So a student who opens the config file finds no usable secret,
@@ -32,6 +34,8 @@ CLI (used by the lockdown scripts; all output is plain text on stdout):
     python3 lockedin_config.py get-url          print the allowed URL
     python3 lockedin_config.py get-hosts        print allowed hosts, one per line
     python3 lockedin_config.py get-recording    print "screen camera audio" as 3 bools
+    python3 lockedin_config.py get-cloud        print the cloud block as JSON
+    python3 lockedin_config.py cloud-enabled    exit 0 if a Supabase project is set
     python3 lockedin_config.py verify-passcode  read passcode on STDIN; exit 0 if correct
     python3 lockedin_config.py verify-admin     read "user\\npassword" on STDIN; exit 0 if ok
 
@@ -55,6 +59,30 @@ DEFAULT_HOSTS = ["rsm-django-02.ucsd.edu", "ucsd.edu", "duosecurity.com"]
 DEFAULT_ADMIN_USER = "admin"
 DEFAULT_ADMIN_PASSWORD = "admin"
 DEFAULT_PASSCODE = "letmeout"
+
+# The proctoring backend. Empty url/anon_key means this machine runs in the
+# original standalone mode: no accounts, no approval gate, nothing leaves the
+# laptop. Filling these in is what turns on the Student / Faculty flow.
+#
+# The anon key belongs here despite being a "key": Supabase publishes it to
+# browsers and desktop apps by design, and every access rule is enforced by the
+# Row Level Security policies in cloud/schema.sql. The service_role key must
+# never be pasted here — it bypasses all of them.
+DEFAULT_CLOUD = {
+    "url": "",
+    "anon_key": "",
+    # A campus ID typed at the login screen is expanded into an address with
+    # this domain, because Supabase authenticates on email and students know
+    # their ID. A12345678 -> A12345678@ucsd.edu.
+    "id_email_domain": "ucsd.edu",
+    # Where the faculty dashboard is published; the Faculty button opens it.
+    "dashboard_url": "",
+    # Live monitoring: how often a thumbnail is published, and how wide it is.
+    # 3s at 640px is roughly 20 KB per student per stream per tick, which is what
+    # keeps a class inside a free tier.
+    "live_interval": 3.0,
+    "live_width": 640,
+}
 
 
 def config_path() -> Path:
@@ -120,6 +148,7 @@ def defaults() -> dict:
         "passcode": hash_secret(DEFAULT_PASSCODE),
         "passcode_is_default": True,
         "recording": {"screen": True, "camera": True, "audio": True},
+        "cloud": dict(DEFAULT_CLOUD),
     }
 
 
@@ -136,6 +165,12 @@ def load(create: bool = True) -> dict:
     # Merge in anything a newer version added, so an old file keeps working.
     merged = defaults()
     merged.update(config)
+    # The nested blocks need the same treatment one level down, or a config
+    # written before a key existed comes back missing it.
+    for block in ("recording", "cloud"):
+        nested = dict(defaults()[block])
+        nested.update(config.get(block) or {})
+        merged[block] = nested
     return merged
 
 
@@ -217,6 +252,15 @@ def main(argv: list[str]) -> int:
         print(" ".join("true" if rec.get(k, True) else "false"
                        for k in ("screen", "camera", "audio")))
         return 0
+
+    if command == "get-cloud":
+        print(json.dumps(config["cloud"], indent=2))
+        return 0
+
+    if command == "cloud-enabled":
+        # Exit status, so a shell script can branch on it without parsing output.
+        cloud = config["cloud"]
+        return 0 if cloud.get("url") and cloud.get("anon_key") else 1
 
     if command == "verify-passcode":
         # Trailing newline from the shell's pipe is not part of the passcode.

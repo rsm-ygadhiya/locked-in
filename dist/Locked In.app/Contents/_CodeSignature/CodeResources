@@ -10,19 +10,31 @@
 		</data>
 		<key>Resources/admin_panel.py</key>
 		<data>
-		Wz8Tscvi6m1tfXPFqtrpGxK9kzU=
+		+Av+ejGo7AntnIG64Z7EwBg904s=
 		</data>
 		<key>Resources/guided-access.command</key>
 		<data>
-		ENgq/nPbyyDkRTeFg5UEai2fWyA=
+		JD73yPJmwJKTQ9pXCGiWXwzIEjE=
+		</data>
+		<key>Resources/lockedin_cloud.py</key>
+		<data>
+		JYOriXhitah3nCIhzFuAbXyRnUk=
 		</data>
 		<key>Resources/lockedin_config.py</key>
 		<data>
-		i2isofCcPB99/GPZ7QctJkq4go0=
+		TqzJ9AZKCTWiSz6OD2EmSjEXMXU=
 		</data>
 		<key>Resources/recorder.py</key>
 		<data>
-		ad6yXKuU+NeOF7zOdUateUUhU58=
+		1/bERfRpFZtESuhbnhtJoAhPe+M=
+		</data>
+		<key>Resources/student_session.py</key>
+		<data>
+		o8iuEOyYaS7redUGdY4aOi4dsac=
+		</data>
+		<key>Resources/uploader.py</key>
+		<data>
+		PQw3jCZtmJpEsJwF8hdoACEpeXc=
 		</data>
 	</dict>
 	<key>files2</key>
@@ -38,28 +50,49 @@
 		<dict>
 			<key>hash2</key>
 			<data>
-			Czy0CCj1aJ/fCl78vTaj+2gPgyxBbfcG17IZbmVNoNg=
+			s4EFj10lO5vpCq+NY/ue5WZhK+QiVpvJWfnSCOYQ5QQ=
 			</data>
 		</dict>
 		<key>Resources/guided-access.command</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			xz5C+jVsgdL1Nl1g0B+kPon3lUVkbNmtHWpdtKm83ko=
+			wOkUDO80F41p3VsgKJsEF4lV8fgYxheQrMPSv5r6Ik8=
+			</data>
+		</dict>
+		<key>Resources/lockedin_cloud.py</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			+hnOnmTeL8H16lFOA2Gt8UfVpEo22uMpOOU1fbnC+ac=
 			</data>
 		</dict>
 		<key>Resources/lockedin_config.py</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			OUa1XVByXAFds5J/muDzhMaiUE/dG2qQ5lenUOTOqag=
+			i0/RPy10bVf3U+rrsc9j92pmviozmZP63+q/yAr043M=
 			</data>
 		</dict>
 		<key>Resources/recorder.py</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			+PqnCNfdx4b1k+jNONSQexhfG5Fyq4j+adDg3PyXoXA=
+			hpcR6/jIOT04PoCqLIT3lD0pTZHaIolfTKujKCyERG0=
+			</data>
+		</dict>
+		<key>Resources/student_session.py</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			ppD0Psxq+Tcz9bFx+pPDJVU6S3MZNbm9ebz7L1I6B/M=
+			</data>
+		</dict>
+		<key>Resources/uploader.py</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			gtqR54TDl1ugHnORXiXAeCDTbz+0uutcZBji4RDi9o0=
 			</data>
 		</dict>
 	</dict>

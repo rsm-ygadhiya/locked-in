@@ -47,8 +47,11 @@ cp "$ICNS"                         "$APP/Contents/Resources/AppIcon.icns"
 cp "$HERE/guided-access.command"   "$APP/Contents/Resources/guided-access.command"
 # The Python helpers ship inside the bundle so the app is self-contained: the lockdown
 # reads its settings through lockedin_config.py, records with recorder.py, and the
-# Admin button opens admin_panel.py.
-for helper in recorder.py lockedin_config.py admin_panel.py; do
+# Admin button opens admin_panel.py. For proctored exams it also runs the check-in
+# (student_session.py) and the live feed (uploader.py), both of which talk to Supabase
+# through lockedin_cloud.py.
+for helper in recorder.py lockedin_config.py admin_panel.py \
+              lockedin_cloud.py student_session.py uploader.py; do
 	cp "$ROOT/$helper" "$APP/Contents/Resources/$helper"
 done
 chmod +x "$APP/Contents/MacOS/LockedIn" "$APP/Contents/Resources/guided-access.command"

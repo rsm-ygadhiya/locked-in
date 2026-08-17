@@ -97,6 +97,7 @@ class AdminPanel(tk.Tk):
         notebook.add(self._sites_tab(notebook), text="Allowed sites")
         notebook.add(self._security_tab(notebook), text="Security")
         notebook.add(self._recording_tab(notebook), text="Recording")
+        notebook.add(self._proctoring_tab(notebook), text="Proctoring")
 
         footer = ttk.Frame(self)
         footer.grid(row=1, column=0, sticky="ew", padx=12, pady=(0, 12))
@@ -190,6 +191,92 @@ class AdminPanel(tk.Tk):
                   foreground="#555").grid(row=5, column=0, sticky="w", **PAD)
         return tab
 
+    def _proctoring_tab(self, parent: ttk.Notebook) -> ttk.Frame:
+        """
+        The Supabase project behind the Student / Faculty flow.
+
+        Leaving these blank is a supported configuration, not an unfinished one: the
+        lockdown then runs exactly as it did before any of this existed — no
+        accounts, no approval gate, nothing leaving the machine.
+        """
+        tab = ttk.Frame(parent)
+        cloud = self.config.get("cloud") or {}
+
+        ttk.Label(tab, text="Proctored exams (optional)", font=("", 13, "bold")) \
+            .grid(row=0, column=0, columnspan=2, sticky="w", **PAD)
+        ttk.Label(tab, text="Fill these in to require a proctor's approval before an\n"
+                            "exam can start. Leave them blank for a standalone,\n"
+                            "offline lockdown.", foreground="#555") \
+            .grid(row=1, column=0, columnspan=2, sticky="w", padx=12)
+
+        self.cloud_entries: dict[str, ttk.Entry] = {}
+        fields = [
+            ("url", "Project URL", "https://xxxxxxxx.supabase.co"),
+            ("anon_key", "Anon key", "the anon public key — never service_role"),
+            ("dashboard_url", "Dashboard address", "where index.html is published"),
+            ("id_email_domain", "ID email domain", "ucsd.edu"),
+        ]
+        for index, (key, text, hint) in enumerate(fields, start=2):
+            ttk.Label(tab, text=text).grid(row=index, column=0, sticky="e", **PAD)
+            entry = ttk.Entry(tab, width=52)
+            entry.insert(0, str(cloud.get(key, "")))
+            entry.grid(row=index, column=1, sticky="w", **PAD)
+            self.cloud_entries[key] = entry
+            ttk.Label(tab, text=hint, foreground="#777") \
+                .grid(row=index, column=2, sticky="w", padx=(0, 12))
+
+        ttk.Separator(tab, orient="horizontal") \
+            .grid(row=6, column=0, columnspan=3, sticky="ew", pady=10)
+
+        ttk.Label(tab, text="Live monitoring").grid(row=7, column=0, sticky="e", **PAD)
+        live = ttk.Frame(tab)
+        live.grid(row=7, column=1, sticky="w", **PAD)
+        self.live_interval = ttk.Spinbox(live, from_=1.0, to=30.0, increment=0.5,
+                                        width=6)
+        self.live_interval.set(float(cloud.get("live_interval") or 3.0))
+        self.live_interval.grid(row=0, column=0)
+        ttk.Label(live, text="seconds between frames,").grid(row=0, column=1, padx=6)
+        self.live_width = ttk.Spinbox(live, from_=240, to=1600, increment=80, width=6)
+        self.live_width.set(int(cloud.get("live_width") or 640))
+        self.live_width.grid(row=0, column=2)
+        ttk.Label(live, text="px wide").grid(row=0, column=3, padx=6)
+
+        ttk.Label(tab, text="The anon key is meant to be public — it ships inside this\n"
+                            "app. Access is enforced by the database policies in\n"
+                            "cloud/schema.sql. Never paste the service_role key here.",
+                  foreground="#555").grid(row=8, column=0, columnspan=3, sticky="w",
+                                          **PAD)
+
+        self.cloud_status = ttk.Label(tab, text="", foreground="#555")
+        self.cloud_status.grid(row=9, column=1, sticky="w", padx=12)
+        ttk.Button(tab, text="Test the connection", command=self._test_cloud) \
+            .grid(row=9, column=0, sticky="e", **PAD)
+        return tab
+
+    def _test_cloud(self) -> None:
+        """Save nothing; just say whether what is typed in actually works."""
+        url = self.cloud_entries["url"].get().strip().rstrip("/")
+        key = self.cloud_entries["anon_key"].get().strip()
+        if not url or not key:
+            self.cloud_status.config(text="Fill in the URL and the anon key first.")
+            return
+        self.cloud_status.config(text="checking...")
+        self.update_idletasks()
+        try:
+            import lockedin_cloud
+        except ImportError:
+            self.cloud_status.config(text="lockedin_cloud.py is missing next to this panel.")
+            return
+        cloud = lockedin_cloud.Cloud(url=url, anon_key=key)
+        try:
+            # An anonymous select against a policy-protected table: an empty result
+            # is a pass, because it proves the URL resolved and the key was accepted.
+            cloud._json("GET", "/rest/v1/exams", params={"select": "id", "limit": 1})
+        except lockedin_cloud.CloudError as error:
+            self.cloud_status.config(text=str(error)[:120])
+            return
+        self.cloud_status.config(text="Reachable, and the key was accepted.")
+
     # ---------- actions ----------
 
     def _add_host(self) -> None:
@@ -259,9 +346,47 @@ class AdminPanel(tk.Tk):
                                      "Use at least 4 characters.")
                 return
 
+        cloud_url = self.cloud_entries["url"].get().strip().rstrip("/")
+        cloud_key = self.cloud_entries["anon_key"].get().strip()
+        if bool(cloud_url) != bool(cloud_key):
+            messagebox.showerror(
+                "Check the proctoring settings",
+                "A project URL needs its anon key, and vice versa. Fill in both to "
+                "turn on proctored exams, or clear both to run standalone.")
+            return
+        if cloud_url and not cloud_url.startswith("https://"):
+            messagebox.showerror("Check the project URL",
+                                 "The Supabase project URL must start with https://")
+            return
+        # A pasted service_role key would work, and would hand every student the
+        # ability to read and rewrite everyone's data. Worth refusing outright.
+        if cloud_key and "service_role" in cloud_key:
+            messagebox.showerror(
+                "That is the wrong key",
+                "That looks like the service_role key. It bypasses every access "
+                "rule in the database.\n\nUse the \"anon public\" key from "
+                "Project Settings > API.")
+            return
+
         self.config["allowed_url"] = url
         self.config["allowed_hosts"] = hosts
         self.config["recording"] = {key: var.get() for key, var in self.rec_vars.items()}
+
+        cloud = dict(self.config.get("cloud") or {})
+        cloud["url"] = cloud_url
+        cloud["anon_key"] = cloud_key
+        cloud["dashboard_url"] = self.cloud_entries["dashboard_url"].get().strip()
+        cloud["id_email_domain"] = (self.cloud_entries["id_email_domain"].get().strip()
+                                    or "ucsd.edu")
+        try:
+            cloud["live_interval"] = max(1.0, float(self.live_interval.get()))
+            cloud["live_width"] = max(240, int(float(self.live_width.get())))
+        except ValueError:
+            messagebox.showerror("Check the live monitoring values",
+                                 "The interval and width have to be numbers.")
+            return
+        self.config["cloud"] = cloud
+
         if new_admin:
             store.set_admin_password(self.config, new_admin)
         if new_passcode:
