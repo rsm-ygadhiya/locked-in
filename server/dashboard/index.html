@@ -147,6 +147,16 @@
                 display: flex; gap: 10px; }
   .events .t { color: var(--muted); flex: 0 0 78px; }
 
+  /* Kept frames. One scrolling row per stream, newest first — a proctor reviewing
+     an exam is looking for the moment something changed, and a strip they can drag
+     through beats a wall of thumbnails they have to read in order. */
+  .strip { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 6px; }
+  .strip .snap { margin: 0; flex: 0 0 auto; width: 168px; }
+  .strip .snap img { width: 100%; border-radius: 8px; background: #000;
+                     display: block; cursor: zoom-in; border: 1px solid var(--line); }
+  .strip .snap figcaption { color: var(--muted); font-size: 11px; padding-top: 4px;
+                            text-align: center; }
+
   #toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
            background: var(--panel-2); border: 1px solid var(--line); color: var(--text);
            padding: 12px 20px; border-radius: 12px; display: none; z-index: 80;
@@ -300,6 +310,13 @@
       <h2>Live (<span id="liveCount">0</span>)</h2>
       <div id="grid" class="grid"></div>
       <p id="gridEmpty" class="empty">No approved students are running yet.</p>
+    </section>
+
+    <section>
+      <h2>Finished (<span id="doneCount">0</span>)</h2>
+      <div id="finished" class="queue"></div>
+      <p id="finishedEmpty" class="empty">Nobody has finished yet. A student lands
+        here when their lockdown ends, or when you end their session.</p>
     </section>
   </main>
 </div>
@@ -514,7 +531,19 @@ function signOut() {
 }
 
 async function loadMe() {
-  const rows = await call("/rest/v1/profiles?select=id,role,full_name,campus_id&limit=1");
+  // Ask for my row by id, rather than for one row and hoping. Faculty can read every
+  // profile — profiles_read_faculty, which is what lets the approval queue show a
+  // student's name — so an unfiltered select returns the whole table here, and
+  // limit=1 with no order by hands back whichever row Postgres reaches first.
+  // Somebody else's, on any project with a second account. That id then went into
+  // exams.faculty_id and the insert was refused by the policy checking
+  // faculty_id = auth.uid(), reported as "new row violates row-level security
+  // policy" — while the header showed a student's name as the signed-in proctor.
+  // A student never saw it: RLS only ever returns their own row to them.
+  const user = await call("/auth/v1/user");
+  if (!user || !user.id) throw new Error("could not confirm which account this is");
+  const rows = await call("/rest/v1/profiles?select=id,role,full_name,campus_id"
+                          + `&id=eq.${user.id}&limit=1`);
   if (!rows || !rows.length) throw new Error("no profile row for this account");
   return rows[0];
 }
@@ -624,7 +653,8 @@ async function deleteExam() {
   const warning =
     `Delete "${currentExam.title}" (${currentExam.join_code})?\n\n` +
     `This also deletes ${sessions.length} student session(s), their ID photos, ` +
-    "their check-in photos and their event history. It cannot be undone.\n\n" +
+    "their check-in photos, every kept frame and their event history. It cannot " +
+    "be undone.\n\n" +
     "The recordings on each student's own machine are not touched.";
   if (!confirm(warning)) return;
   if (sessions.length && !confirm(
@@ -767,9 +797,15 @@ async function resetSession(sessionId) {
 // The four objects a session can own. Missing ones are fine — the point is that
 // they are gone, and a student who never got as far as a selfie has none.
 async function deleteSessionFiles(sessionId) {
+  // The four a session always owns, plus however many frames were kept. The kept
+  // ones have to be read out of the table first: once the session row goes, the
+  // snapshot rows cascade with it and nothing can name those files again.
+  const kept = await call(
+    `/rest/v1/snapshots?select=storage_path&session_id=eq.${sessionId}`) || [];
   const targets = [
     ["identity", "id.jpg"], ["identity", "selfie.jpg"],
     ["live", "screen.jpg"], ["live", "camera.jpg"],
+    ...kept.map((row) => ["live", row.storage_path.split("/").slice(1).join("/")]),
   ];
   const results = await Promise.all(targets.map(async ([bucket, file]) => {
     try {
@@ -902,6 +938,86 @@ async function paintGrid(sessions) {
   }
 }
 
+// Sessions that are over. The point of this list is that it survives the exam:
+// the kept frames and the identity photos are still there behind each row, until
+// the exam is deleted.
+async function paintFinished(sessions) {
+  const done = sessions
+    .filter((s) => s.status === "ended")
+    .sort((a, b) => new Date(b.ended_at || 0) - new Date(a.ended_at || 0));
+  $("doneCount").textContent = done.length;
+  $("finishedEmpty").hidden = done.length > 0;
+
+  const counts = await snapshotCounts(done.map((s) => s.id));
+  const list = $("finished");
+  list.innerHTML = "";
+  for (const session of done) {
+    const kept = counts[session.id] || 0;
+    const card = document.createElement("div");
+    card.className = "pending";
+    card.innerHTML = `
+      <div class="meta">
+        <div class="name">${escapeHtml(nameOf(session))}</div>
+        <div class="sub">finished ${ago(session.ended_at)} · ${lasted(session)}</div>
+        <div class="sub">${kept} kept frame${kept === 1 ? "" : "s"}</div>
+      </div>
+      <div class="acts">
+        <button class="small ghost" onclick="openDetail('${session.id}')">Review</button>
+      </div>`;
+    list.appendChild(card);
+  }
+}
+
+// How long they sat the exam, from the lockdown starting to it ending.
+function lasted(session) {
+  if (!session.started_at || !session.ended_at) return "length unknown";
+  const ms = new Date(session.ended_at) - new Date(session.started_at);
+  if (!(ms > 0)) return "length unknown";
+  const mins = Math.round(ms / 60000);
+  if (mins < 60) return `${mins} min`;
+  return `${Math.floor(mins / 60)}h ${String(mins % 60).padStart(2, "0")}m`;
+}
+
+// One count query for the whole list rather than one per student. PostgREST
+// returns the rows; counting them here beats N round trips for a number.
+async function snapshotCounts(sessionIds) {
+  if (!sessionIds.length) return {};
+  const list = `(${sessionIds.join(",")})`;
+  const rows = await call(
+    `/rest/v1/snapshots?select=session_id&session_id=in.${encodeURIComponent(list)}`)
+    || [];
+  const counts = {};
+  for (const row of rows) { counts[row.session_id] = (counts[row.session_id] || 0) + 1; }
+  return counts;
+}
+
+// The kept frames for one student, newest first. Capped: a two-hour exam at one a
+// minute is 240 images, and signing a URL for every one of them to fill a strip
+// nobody scrolls to the end of is a waste of everybody's bandwidth.
+const STRIP_MAX = 40;
+
+async function loadSnapshots(sessionId) {
+  return await call(`/rest/v1/snapshots?select=*&session_id=eq.${sessionId}` +
+                    `&order=captured_at.desc`) || [];
+}
+
+async function stripHtml(rows, kind) {
+  const mine = rows.filter((r) => r.kind === kind);
+  if (!mine.length) return `<p class="empty">No kept ${kind} frames.</p>`;
+  const shown = mine.slice(0, STRIP_MAX);
+  const urls = await Promise.all(shown.map((r) => signedUrl("live", r.storage_path)));
+  const cells = shown.map((row, i) => urls[i]
+    ? `<figure class="snap">
+         <img src="${urls[i]}" alt="${kind} at ${new Date(row.captured_at).toLocaleTimeString()}"
+              onclick="zoom('${urls[i]}')">
+         <figcaption>${new Date(row.captured_at).toLocaleTimeString()}</figcaption>
+       </figure>` : "").join("");
+  const more = mine.length > shown.length
+    ? `<p class="sub" style="margin-top:6px">Showing the newest ${shown.length} of
+       ${mine.length}. All of them are kept until the exam is deleted.</p>` : "";
+  return `<div class="strip">${cells}</div>${more}`;
+}
+
 // ===========================================================================
 // One student, in detail
 // ===========================================================================
@@ -919,6 +1035,10 @@ async function openDetail(sessionId) {
     signedUrl("live", frames.camera?.storage_path),
     signedUrl("identity", session.id_photo_path),
     signedUrl("identity", session.selfie_path),
+  ]);
+  const snaps = await loadSnapshots(sessionId);
+  const [screenStrip, camStrip] = await Promise.all([
+    stripHtml(snaps, "screen"), stripHtml(snaps, "camera"),
   ]);
 
   $("sheet").innerHTML = `
@@ -947,6 +1067,10 @@ async function openDetail(sessionId) {
           ${selfieUrl ? `<img class="big" style="max-width:200px" src="${selfieUrl}"
                       alt="check-in photo" onclick="zoom('${selfieUrl}')">` : ""}
         </div>
+        <h2 style="margin-top:18px">Kept frames — screen</h2>
+        ${screenStrip}
+        <h2 style="margin-top:14px">Kept frames — webcam</h2>
+        ${camStrip}
       </div>
       <div>
         <h2>Timeline</h2>
@@ -995,6 +1119,7 @@ async function refresh() {
     const sessions = await loadSessions();
     await paintQueue(sessions);
     await paintGrid(sessions);
+    await paintFinished(sessions);
   } catch (error) {
     // Shown once per failure rather than silently: a proctor needs to know the
     // grid has gone stale, not stare at frozen thumbnails.

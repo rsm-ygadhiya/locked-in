@@ -145,6 +145,51 @@ or reboot; cleanup still runs. If the passcode is genuinely lost, delete the set
 file (`~/Library/Application Support/LockedIn/config.json`, or `%LOCALAPPDATA%\LockedIn\`)
 and the next run recreates it with the default, `admin`.
 
+### The floating exit button
+
+**It isn't there.** On macOS it is a separate binary, `LockedInOverlay`, built by
+`macos/build.sh` and shipped inside the app bundle. Running from a clone without
+building it means no pill — the lockdown says so at startup and carries on, and
+quitting Chrome still asks for the code. Check `overlay.log` in the session folder:
+it records where the pill thinks it put itself.
+
+**It's off screen, or somewhere annoying.** It remembers where it was last dragged to,
+in `~/Library/Application Support/LockedIn/overlay-position.json`. Delete that file and
+it goes back to the bottom-right corner.
+
+**The code is rejected there but works in the usual prompt.** They run the same
+verifier, so this should be impossible — if you see it, check `overlay.log` and file it,
+because it means the two paths have drifted apart.
+
+**Typing into it does nothing.** It is a non-activating panel: it takes keyboard focus
+without pulling focus away from Chrome, which is what stops the lockdown's every-0.3s
+"put Chrome back in front" pass from fighting it. If a click does not put a cursor in
+the field, that mechanism is what to suspect first, and closing Chrome is still the way
+out.
+
+**Nobody wants a button students can press.** It only ever ends the lockdown for
+someone who knows the exit code, which is the proctor's, and the code is checked by the
+server rather than on the machine. If you would still rather not have it, delete
+`LockedInOverlay` from the bundle's `Resources/`.
+
+### Kept frames
+
+**The filmstrips are empty.** Three things to check in order: `snapshot_interval` is
+not 0 in Faculty → Exam settings → Proctoring; `schema.sql` has been re-run against the
+project since kept frames existed, so the `snapshots` table is there; and the exam is
+long enough to have reached the first interval. `uploader.log` in the session folder
+says how many frames it kept.
+
+**Storage is filling up.** Kept frames are never overwritten, so they only grow until
+the exam is deleted — roughly 500 MB for forty students over two hours at one a minute,
+against a 1 GB free tier. Delete exams once grades are in, lengthen the interval, or set
+it to 0.
+
+**A deleted exam left files behind.** It shouldn't: the dashboard reads the snapshot
+rows, deletes each file through the Storage API, and only then deletes the exam, because
+a file whose row is gone can no longer be named by anyone. If a delete failed halfway it
+says so and keeps the rows, so run it again rather than deleting the rows by hand.
+
 ### The proctor dashboard
 
 **The Faculty button does nothing.** It needs `uv` to start the local server, and a

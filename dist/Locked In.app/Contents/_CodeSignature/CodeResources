@@ -8,25 +8,29 @@
 		<data>
 		0pAs286bzcr2L7/GE5aAZ2IOxYs=
 		</data>
+		<key>Resources/LockedInOverlay</key>
+		<data>
+		/s1NuvZYfdTZq6EAMFpkRI4GQ6Y=
+		</data>
 		<key>Resources/admin_panel.py</key>
 		<data>
-		X7m6A0n2FQX6aoDY155bcXePh1I=
+		EBFAI0UCTPA7g4oFsFsq9decY8E=
 		</data>
 		<key>Resources/dashboard/index.html</key>
 		<data>
-		ocQzVQxZbf7spztgMKRR1A6ExGg=
+		s8xfPB2+ediwbbINdi7Gn2ZgNWQ=
 		</data>
 		<key>Resources/guided-access.command</key>
 		<data>
-		WmZ6CxyArlvOvk/1IBwJ3pwfQLI=
+		H4E7ZY+Bta0PPfLbDD9/ZzZxM/I=
 		</data>
 		<key>Resources/lockedin_cloud.py</key>
 		<data>
-		/IDP9Hn6R7hEBu6f1vdiy/x8pOU=
+		6coA+2GaYhgiisbW7J52gK2aVJU=
 		</data>
 		<key>Resources/lockedin_config.py</key>
 		<data>
-		ke7NpC+dQ+TGTBQtevCyN0cNgBo=
+		4VPqqwmNfqBfsLzKHuGcdrCvwwI=
 		</data>
 		<key>Resources/recorder.py</key>
 		<data>
@@ -42,7 +46,7 @@
 		</data>
 		<key>Resources/uploader.py</key>
 		<data>
-		/i72EtFg9n0qYtbsqCvRIo/ky5Q=
+		m58lVDdqUZk7T2WSKf+QCTB505g=
 		</data>
 	</dict>
 	<key>files2</key>
@@ -54,39 +58,46 @@
 			/ldcMeENh0v20c0KMEl6MTuhwZb++uWw7wWdpl569Fg=
 			</data>
 		</dict>
+		<key>Resources/LockedInOverlay</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			/dIwCALxG6zhPposAUb4sZbR8NSdoaY/q9grmPUXFno=
+			</data>
+		</dict>
 		<key>Resources/admin_panel.py</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			hPTT0juqH9UttfV9o8whNcxN8f0L1mMhFTUY/vyKzeI=
+			3jF9ep1fydXHp93KmoC7ltIFjgSX4E0zTQ6Wi9roQX0=
 			</data>
 		</dict>
 		<key>Resources/dashboard/index.html</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			SUC1FiZCvwuPWz6ImOqCZ5yVF/Pr4XsCNGAKUpxohko=
+			wnqSbxKR+HunKMQA8oXd7EKfGQK0BVum0pdo7o5DvjU=
 			</data>
 		</dict>
 		<key>Resources/guided-access.command</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			WkGrNZzqxZjXUFolUZapIXenxJQWnMBntiXXuiAJ4UY=
+			h5wyRdUZRmMcCa05fplQeTeY8M6WQWzZ65F6D7+h7N8=
 			</data>
 		</dict>
 		<key>Resources/lockedin_cloud.py</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			aJzkaYoVLI+rJci1hxkf8zBBi8AhUavVhP3qWU675hQ=
+			wTTb3p332mek5eumHaPLW+/GwgteYKQzs2tnu7267k8=
 			</data>
 		</dict>
 		<key>Resources/lockedin_config.py</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			oTsECTJslrKPW9pKPHDD0Is9fkW6zLvvoVo/fGtkZbg=
+			gXFYA/l9rn00vKSkM7l+peqK/VbpI32MateD5N4sRPw=
 			</data>
 		</dict>
 		<key>Resources/recorder.py</key>
@@ -114,7 +125,7 @@
 		<dict>
 			<key>hash2</key>
 			<data>
-			p2g7gEBS3f8xuK63YDADvVHXfubvt+KrGAmFrP4ChBw=
+			0Oo84vkSzQR7gA2horOSTIS5LHYMk1fuC6CBnn/U2oY=
 			</data>
 		</dict>
 	</dict>

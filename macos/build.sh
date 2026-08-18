@@ -37,12 +37,19 @@ echo "==> compiling main.swift"
 mkdir -p "$BUILD"
 swiftc -O "$HERE/src/main.swift" -o "$BUILD/LockedIn"
 
+# The floating "End exam" pill the lockdown draws over Chrome. Separate binary
+# rather than part of the launcher: the launcher has quit long before it is needed,
+# and this one has to run as an accessory app so the lockdown leaves it alone.
+echo "==> compiling overlay.swift"
+swiftc -O "$HERE/src/overlay.swift" -o "$BUILD/LockedInOverlay"
+
 # ---------- assemble the bundle ----------
 echo "==> assembling $APP"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$HERE/src/Info.plist"          "$APP/Contents/Info.plist"
 cp "$BUILD/LockedIn"               "$APP/Contents/MacOS/LockedIn"
+cp "$BUILD/LockedInOverlay"        "$APP/Contents/Resources/LockedInOverlay"
 cp "$ICNS"                         "$APP/Contents/Resources/AppIcon.icns"
 cp "$HERE/guided-access.command"   "$APP/Contents/Resources/guided-access.command"
 # The Python helpers ship inside the bundle so the app is self-contained: the lockdown
@@ -59,7 +66,8 @@ done
 mkdir -p "$APP/Contents/Resources/dashboard"
 cp "$ROOT/server/serve.py"             "$APP/Contents/Resources/serve.py"
 cp "$ROOT/server/dashboard/index.html" "$APP/Contents/Resources/dashboard/index.html"
-chmod +x "$APP/Contents/MacOS/LockedIn" "$APP/Contents/Resources/guided-access.command"
+chmod +x "$APP/Contents/MacOS/LockedIn" "$APP/Contents/Resources/guided-access.command" \
+         "$APP/Contents/Resources/LockedInOverlay"
 
 # ---------- ad-hoc sign ----------
 # No paid Developer ID here, so this is an ad-hoc signature. Gatekeeper will still
@@ -70,9 +78,27 @@ chmod +x "$APP/Contents/MacOS/LockedIn" "$APP/Contents/Resources/guided-access.c
 # codesign refuses those outright: "resource fork, Finder information, or similar
 # detritus not allowed". Without this, the build works once and then fails for
 # everyone who has actually run the thing.
-xattr -cr "$APP"
 echo "==> ad-hoc signing"
-codesign --force --deep --sign - "$APP"
+# Retried, because clearing the attributes is not always the end of it: on a Desktop
+# or Documents folder synced by iCloud, the file provider re-stamps com.apple.FinderInfo
+# on the bundle within moments, and codesign refuses whatever it finds at the instant
+# it looks. Clearing and signing in a tight loop wins that race; three tries is plenty.
+signed=false
+for attempt in 1 2 3; do
+	xattr -cr "$APP" 2>/dev/null || true
+	xattr -d com.apple.FinderInfo "$APP" 2>/dev/null || true
+	if codesign --force --deep --sign - "$APP" 2>/dev/null; then
+		signed=true
+		break
+	fi
+	sleep 1
+done
+if [[ "$signed" != true ]]; then
+	echo "!! codesign failed three times. If this bundle lives in an iCloud-synced" >&2
+	echo "   folder, build it somewhere local instead — the sync daemon keeps" >&2
+	echo "   putting Finder metadata back faster than it can be cleared." >&2
+	exit 1
+fi
 codesign -dv "$APP" 2>&1 | head -4
 
 echo "==> done: $APP"

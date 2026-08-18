@@ -1,0 +1,13 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "rewrites": [
+    { "source": "/", "destination": "/server/dashboard/index.html" },
+    { "source": "/dashboard", "destination": "/server/dashboard/index.html" }
+  ],
+  "headers": [
+    {
+      "source": "/server/dashboard/index.html",
+      "headers": [{ "key": "Cache-Control", "value": "no-store" }]
+    }
+  ]
+}

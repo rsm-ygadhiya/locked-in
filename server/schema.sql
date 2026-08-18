@@ -10,6 +10,7 @@
 --   exams         a faculty-owned exam with a join code students type in
 --   sessions      one student's attempt at one exam — this is what gets approved
 --   live_frames   the newest screen and camera thumbnail per session
+--   snapshots     kept frames, one row per stored image, for review afterwards
 --   events        an append-only log: heartbeats, blocked sites, focus loss
 --
 -- Every table has Row Level Security on, and the app only ever holds the anon
@@ -168,6 +169,36 @@ create table if not exists public.live_frames (
     captured_at  timestamptz not null default now(),
     primary key (session_id, kind)
 );
+
+
+-- ---------------------------------------------------------------------------
+-- snapshots
+--
+-- The opposite trade to live_frames, and the two exist side by side on purpose.
+-- live_frames answers "what is on this student's screen right now" and is
+-- overwritten forever; this answers "what did the exam look like" and is kept
+-- until the proctor deletes the exam.
+--
+-- One row per stored image, so the table is also the list of files to delete —
+-- there is no fixed set of names to cross join, the way there is for the four
+-- objects a session always owns. That matters at deletion time: a file whose row
+-- is gone can no longer be found by anyone.
+--
+-- Cadence is a client setting (cloud.snapshot_interval, default 60s), not a
+-- server one, because the free tier's 1 GB is spent here and the person choosing
+-- how fast to spend it is the one setting up the machines.
+-- ---------------------------------------------------------------------------
+
+create table if not exists public.snapshots (
+    id           bigserial   primary key,
+    session_id   uuid        not null references public.sessions (id) on delete cascade,
+    kind         text        not null check (kind in ('screen', 'camera')),
+    storage_path text        not null,
+    captured_at  timestamptz not null default now()
+);
+
+create index if not exists snapshots_session_idx
+    on public.snapshots (session_id, captured_at desc);
 
 
 -- ---------------------------------------------------------------------------
@@ -372,6 +403,16 @@ language sql stable security definer set search_path = public, pg_temp as $$
                        ('live', 'screen.jpg'), ('live', 'camera.jpg'))
                as b(bucket, name)
     where  e.faculty_id = auth.uid()
+      and  s.requested_at < now() - make_interval(days => older_than_days)
+    union all
+    -- The kept snapshots. No fixed list of names to cross join here — however
+    -- many were stored is however many rows there are, which is exactly why the
+    -- table exists.
+    select 'live'::text, sn.storage_path
+    from   public.snapshots sn
+    join   public.sessions s on s.id = sn.session_id
+    join   public.exams e on e.id = s.exam_id
+    where  e.faculty_id = auth.uid()
       and  s.requested_at < now() - make_interval(days => older_than_days);
 $$;
 
@@ -488,6 +529,7 @@ alter table public.exams        enable row level security;
 alter table public.exam_secrets enable row level security;
 alter table public.sessions    enable row level security;
 alter table public.live_frames enable row level security;
+alter table public.snapshots   enable row level security;
 alter table public.events      enable row level security;
 
 -- Re-runnable: drop before create.
@@ -506,6 +548,9 @@ drop policy if exists sessions_faculty_delete  on public.sessions;
 drop policy if exists frames_student_write     on public.live_frames;
 drop policy if exists frames_student_update    on public.live_frames;
 drop policy if exists frames_read              on public.live_frames;
+drop policy if exists snapshots_student_insert on public.snapshots;
+drop policy if exists snapshots_read           on public.snapshots;
+drop policy if exists snapshots_faculty_delete on public.snapshots;
 drop policy if exists events_student_insert    on public.events;
 drop policy if exists events_read              on public.events;
 
@@ -615,6 +660,22 @@ create policy frames_read on public.live_frames
         public.owns_session(session_id) or public.proctors_session(session_id)
     );
 
+-- snapshots -----------------------------------------------------------------
+-- Insert only, for the student: a kept frame that could be edited or removed by
+-- the person being watched would not be worth keeping. Deleting them is the
+-- proctor's job, and happens when the exam goes.
+
+create policy snapshots_student_insert on public.snapshots
+    for insert with check (public.owns_session(session_id));
+
+create policy snapshots_read on public.snapshots
+    for select using (
+        public.owns_session(session_id) or public.proctors_session(session_id)
+    );
+
+create policy snapshots_faculty_delete on public.snapshots
+    for delete using (public.proctors_session(session_id));
+
 -- events --------------------------------------------------------------------
 
 create policy events_student_insert on public.events
@@ -637,6 +698,11 @@ create policy events_read on public.events
 --   identity/<session-id>/selfie.jpg  photo of the person holding it
 --   live/<session-id>/screen.jpg      newest screen thumbnail, overwritten
 --   live/<session-id>/camera.jpg      newest webcam thumbnail, overwritten
+--   live/<session-id>/snap/<ms>-<kind>.jpg   kept snapshots, never overwritten
+--
+-- The snapshots sit under the same session-id prefix on purpose: every storage
+-- policy below decides by the first path segment, so kept frames inherit exactly
+-- the same access rules as the live ones without a policy of their own.
 -- ---------------------------------------------------------------------------
 
 insert into storage.buckets (id, name, public)

@@ -88,6 +88,9 @@ And in proctored mode:
 | **Students can't self-admit** | Enforced by a database trigger, not by the app asking nicely |
 | **Per-exam exit code** | A code only proctors know ends the lockdown; checked server-side, so it never reaches the student's machine |
 | **Proctors add proctors** | From the dashboard; a student cannot promote themselves |
+| **Kept frames** | A snapshot every minute is stored and survives the exam, so there is something to review afterwards rather than only a live grid |
+| **Finished list** | Students who ended, with how long they sat, their photos and their kept frames |
+| **Floating exit button** | A draggable pill on the student's screen: click, type the exit code, done — no attacking the browser to be offered the door |
 
 ---
 
@@ -125,11 +128,13 @@ locked-in/
 │   └── src/
 │       ├── main.swift        the launcher UI (Cocoa + WKWebView, matrix-rain screen)
 │       ├── Info.plist        app bundle metadata + permission strings
+│       ├── overlay.swift     the floating "End exam" pill drawn over the lockdown
 │       ├── mkicon.swift      draws the padlock AppIcon programmatically
 │       ├── launcher.applescript   earlier AppleScript-only launcher (superseded)
 │       └── lockdown.applescript   the lockdown loop, standalone (reference)
 ├── windows/
 │   ├── LockedIn.hta          the launcher UI (HTA, same screen as the Mac app)
+│   ├── exit-button.ps1       the floating "End exam" button, Windows side
 │   └── guided-access.ps1     the actual Windows lockdown (PowerShell, self-elevating)
 ├── assets/
 │   └── AppIcon.icns          prebuilt icon
@@ -342,6 +347,28 @@ per student overwritten in place every few seconds, plus heartbeats and events. 
 full-rate video and all audio never leave the machine. That is what keeps a whole
 class inside the free tier — see the cost breakdown in SETUP.md.
 
+**Kept frames.** The live thumbnails answer "what is on this screen right now" and are
+overwritten forever, which leaves nothing to look at once an exam is over. So on a
+slower clock — `snapshot_interval`, a minute by default — one frame of each stream is
+also *kept*, and kept frames are never overwritten. They live until you delete the
+exam, they show up as a filmstrip under each student in the dashboard, and deleting the
+exam deletes every one of them along with the identity photos. That interval is the
+setting that spends the free tier's 1 GB: forty students for two hours at one a minute
+is roughly 500 MB, and there is no overwriting to save you. Set it to 0 to keep none.
+
+**Ending an exam from the student's screen.** A draggable pill floats above the
+lockdown. Click it, type the exit code, and the lockdown ends — the same code, checked
+the same way, as the prompt you get by quitting Chrome. On macOS it is a non-activating
+panel at screen-saver level so it can draw over Chrome's fullscreen Space without
+stealing focus, and it runs as an accessory process so the lockdown's own "quit and
+hide everything else" pass leaves it alone. Drag it where you like; it stays there next
+time.
+
+**Who finished.** Sessions that ended are listed under Finished, with how long each
+student sat, how many frames were kept, and a Review button that opens their photos,
+their kept frames and their timeline — all of it still there until the exam is
+deleted.
+
 Check a project from the command line without launching anything:
 
 ```bash
@@ -472,6 +499,10 @@ you should use this at all:
 - **Proctored mode needs the internet**, and the free tier's limits are real: roughly
   200 MB of egress for a 40-student, 2-hour exam, dominated by how many people have
   the live grid open.
+- **Kept frames are stored, not overwritten**, so they are the one thing here that
+  grows without bound until you delete the exam — about 500 MB for a 40-student,
+  2-hour exam at one a minute, against a 1 GB free tier. Lengthen the interval or set
+  it to 0 if that is not a trade you want.
 - **Not security-reviewed.** The access rules have a test suite
   ([server/tests/](server/tests/README.md)); the rest of it has had no outside review.
 

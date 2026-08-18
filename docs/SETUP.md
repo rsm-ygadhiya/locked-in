@@ -25,9 +25,14 @@ You need: a Supabase account (free, no card), and the ability to run one SQL scr
 2. Paste the entire contents of [`server/schema.sql`](../server/schema.sql) and press **Run**.
 3. It should finish with *Success. No rows returned*.
 
-That creates six tables, the Row Level Security policies that decide who can see
+That creates seven tables, the Row Level Security policies that decide who can see
 what, two private storage buckets, the trigger that stops a student from approving
 themselves, and the functions behind exit codes and adding proctors.
+
+> **Upgrading an existing project?** Run the whole file again. It is idempotent, and
+> re-running is how you get `snapshots` — the table behind kept frames. Without it the
+> app still runs an exam, but nothing is kept to review and the dashboard's filmstrips
+> stay empty.
 
 Running it a second time is safe — it drops and recreates the policies rather than
 erroring.
@@ -192,6 +197,10 @@ By hand, or on a machine with no terminal: open the Locked In launcher → **Fac
 - **ID email domain** — `ucsd.edu` unless you changed it
 - **Live monitoring** — 3 seconds at 640px is a sensible default; see the bandwidth
   note below before raising it
+- **Keep a frame** — how often a thumbnail is *kept* instead of overwritten, 60
+  seconds by default. Kept frames are what you review after the exam, and they live
+  until you delete it. 0 keeps none. This is the number that spends your storage:
+  forty students for two hours at one a minute is roughly 500 MB of the free 1 GB
 
 Press **Test the connection**, then **Save**.
 
@@ -250,6 +259,12 @@ deliberate: failing closed would leave a student trapped in a locked browser.
 `~/Desktop/LockedIn-Recordings/`. Only the thumbnails and the two identity photos
 were ever uploaded.
 
+Everyone who ended is under **Finished**, with how long they sat and how many frames
+were kept. **Review** opens their identity photos, their kept frames as a filmstrip,
+and their event timeline. All of that stays until you delete the exam — **Delete exam**
+removes the sessions, the photos and every kept frame in the order that actually works
+(files first, rows second), and cannot be undone.
+
 ---
 
 ## What this costs
@@ -268,6 +283,13 @@ having fewer people staring at the dashboard, not the interval.
 
 Raising the interval to 1 second triples that. Going the other way, 10 seconds is
 still perfectly usable for spotting someone on their phone.
+
+**Kept frames are the other half of the bill, and they behave differently.** Nothing
+about them is overwritten, so they cost storage rather than egress and the total only
+goes up until you delete the exam: forty students for two hours at one a minute is
+around 500 MB of the free 1 GB. Two exams like that fill it. Either lengthen the
+interval, delete exams once grades are in, or set it to 0 and go back to live-only
+monitoring.
 
 ## Deleting the data afterwards
 

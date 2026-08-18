@@ -501,7 +501,35 @@ try {
     Launch-Chrome-Kiosk
     Start-Sleep -Seconds 2
 
+    # The floating "End exam" button. Its own process, so the loop below keeps
+    # enforcing while it sits there waiting to be used. Missing or blocked is not
+    # fatal: closing Chrome still asks for the code, exactly as before.
+    $ReleaseFile = Join-Path $SessionDir "RELEASE"
+    $PromptFile  = Join-Path $SessionDir "PROMPTING"
+    Remove-Item $ReleaseFile, $PromptFile -Force -ErrorAction SilentlyContinue
+    $ExitButton = $null
+    $buttonScript = Join-Path $ScriptDir "exit-button.ps1"
+    if (Test-Path $buttonScript) {
+        $buttonArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden",
+                        "-File", $buttonScript,
+                        "-ReleaseFile", $ReleaseFile, "-PromptFile", $PromptFile,
+                        "-PyExe", $PyExe, "-PyArgs", ($PyArgs -join " "),
+                        "-ConfigPy", $ConfigPy)
+        if ($Proctored -and $CloudPy -and $LiveExam) {
+            $buttonArgs += @("-CloudPy", $CloudPy, "-ExamId", $LiveExam,
+                             "-TokenFile", (Join-Path $SessionDir "token.json"))
+        }
+        try {
+            $ExitButton = Start-Process powershell -ArgumentList $buttonArgs `
+                -WindowStyle Hidden -PassThru
+        } catch { $ExitButton = $null }
+    }
+
     while ($true) {
+        # A correct code typed into the floating button: same ending as typing it
+        # into the passcode prompt.
+        if (Test-Path $ReleaseFile) { break }
+
         $chrome = Get-Process chrome -ErrorAction SilentlyContinue
         if (-not $chrome) {
             # Chrome closed -> relaunch immediately, then DEMAND the passcode.
@@ -509,6 +537,10 @@ try {
             Start-Sleep -Seconds 1
             do { $entry = Show-PasscodePrompt } until (Test-ExitCode $entry)
             break   # correct passcode -> leave the loop and clean up
+        }
+        elseif (Test-Path $PromptFile) {
+            # The button's code prompt is open. Pulling Chrome back to the front now
+            # would eat the keystrokes of whoever is typing the code into it.
         }
         else {
             Kill-OtherWindows
@@ -518,6 +550,12 @@ try {
     }
 }
 finally {
+    # The button must not be left floating over an unlocked machine.
+    if ($ExitButton -and -not $ExitButton.HasExited) {
+        try { $ExitButton.Kill() } catch { }
+    }
+    Remove-Item $ReleaseFile, $PromptFile -Force -ErrorAction SilentlyContinue
+
     # Uploader first: it needs the live tiles to still exist to publish a last frame,
     # and it is what marks the session ended for the proctor.
     Stop-Uploading

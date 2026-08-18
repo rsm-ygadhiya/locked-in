@@ -12,6 +12,16 @@ can show a live grid.
     <session-dir>/live/screen.jpg  --->  live/<session-id>/screen.jpg
     <session-dir>/live/camera.jpg  --->  live/<session-id>/camera.jpg
 
+Those two are overwritten every few seconds, so they only ever answer "what is on
+this screen right now". On a slower cadence it also *keeps* a frame —
+
+    <session-dir>/live/screen.jpg  --->  live/<session-id>/snap/<ms>-screen.jpg
+
+— which is what the proctor reviews after the exam. Kept frames are never
+overwritten and live until the exam is deleted, so the interval between them is
+the setting that spends the free tier: cloud.snapshot_interval, 60s by default,
+0 to keep nothing.
+
 Three reasons it is a separate process rather than threads inside the recorder:
 
   * only one process can hold the webcam, so this one cannot capture its own frames
@@ -64,6 +74,10 @@ class Tile:
         self.kind = kind
         self.last_mtime = 0.0
         self.failures = 0
+        # The most recent bytes seen, whether or not they were new. A student
+        # reading a question sits perfectly still for minutes, and a snapshot run
+        # that skipped them would leave exactly the stretch worth reviewing blank.
+        self.last_data: bytes | None = None
 
     def fresh_bytes(self) -> bytes | None:
         """The file's contents if it changed since the last upload, else None."""
@@ -82,16 +96,24 @@ class Tile:
         if not data:
             return None
         self.last_mtime = mtime
+        self.last_data = data
         return data
+
+    def current_bytes(self) -> bytes | None:
+        """The newest contents, new or not — for the keep-a-frame pass."""
+        fresh = self.fresh_bytes()
+        return fresh if fresh is not None else self.last_data
 
 
 def run(cloud: lockedin_cloud.Cloud, session_id: str, session_dir: Path,
-        interval: float) -> int:
+        interval: float, snapshot_interval: float = 0.0) -> int:
     live = session_dir / "live"
     tiles = [Tile(live / "screen.jpg", "screen"), Tile(live / "camera.jpg", "camera")]
     stop_file = session_dir / "STOP"
 
     log(f"publishing every {interval:g}s for session {session_id}")
+    if snapshot_interval > 0:
+        log(f"keeping a frame every {snapshot_interval:g}s")
     # approved -> active, so the proctor's grid distinguishes a student who has been
     # let in from one whose lockdown is actually running. The database only permits
     # this exact transition from a student's own credentials.
@@ -105,7 +127,8 @@ def run(cloud: lockedin_cloud.Cloud, session_id: str, session_dir: Path,
     cloud.log_event(session_id, "upload.start", f"watching {live}")
 
     next_tick = 0.0
-    sent = 0
+    next_snap = 0.0
+    sent = kept = snap_failures = 0
     while not STOP.is_set():
         if stop_file.exists():
             log("stop file seen — finishing")
@@ -130,12 +153,29 @@ def run(cloud: lockedin_cloud.Cloud, session_id: str, session_dir: Path,
                         log(f"{tile.kind}: upload failed ({error})")
             cloud.heartbeat(session_id)
 
+        # Kept frames run on their own clock, and deliberately after the live
+        # tiles: if the network is only good enough for one of the two, the live
+        # grid is the one a proctor is watching right now.
+        if snapshot_interval > 0 and now >= next_snap:
+            next_snap = now + snapshot_interval
+            for tile in tiles:
+                data = tile.current_bytes()
+                if data is None:
+                    continue
+                try:
+                    cloud.put_snapshot(session_id, tile.kind, data)
+                    kept += 1
+                except lockedin_cloud.CloudError as error:
+                    snap_failures += 1
+                    if snap_failures in (1, 10, 100):
+                        log(f"{tile.kind}: could not keep a frame ({error})")
+
         STOP.wait(POLL)
 
     # Best-effort close-out. If the network is gone, the dashboard will simply see
     # the heartbeat go stale, which reads as "stopped" anyway.
-    log(f"sent {sent} frames; marking the session ended")
-    cloud.log_event(session_id, "upload.stop", f"{sent} frames")
+    log(f"sent {sent} frames, kept {kept}; marking the session ended")
+    cloud.log_event(session_id, "upload.stop", f"{sent} frames, {kept} kept")
     try:
         cloud.patch_session(session_id, {
             "status": "ended",
@@ -175,6 +215,9 @@ def main(argv: list[str] | None = None) -> int:
                        help="JSON with access_token / refresh_token; the lockdown scrubs it")
     parser.add_argument("--interval", type=float, default=0.0,
                        help="seconds between publishes (default: from the config)")
+    parser.add_argument("--snapshot-interval", type=float, default=None,
+                       help="seconds between kept frames; 0 keeps none "
+                            "(default: from the config)")
     args = parser.parse_args(argv)
 
     for sig in (signal.SIGINT, signal.SIGTERM):
@@ -187,6 +230,11 @@ def main(argv: list[str] | None = None) -> int:
 
     settings = lockedin_cloud.cloud_settings()
     interval = args.interval or float(settings.get("live_interval") or 3.0)
+    snapshot_interval = (args.snapshot_interval if args.snapshot_interval is not None
+                         else float(settings.get("snapshot_interval") or 0.0))
+    # A snapshot cadence faster than the live one would keep the same frame twice.
+    if 0 < snapshot_interval < interval:
+        snapshot_interval = interval
 
     try:
         cloud = lockedin_cloud.Cloud.from_config()
@@ -209,7 +257,7 @@ def main(argv: list[str] | None = None) -> int:
         log("ERROR: the token file held no access token")
         return 2
 
-    return run(cloud, args.session_id, session_dir, interval)
+    return run(cloud, args.session_id, session_dir, interval, snapshot_interval)
 
 
 if __name__ == "__main__":

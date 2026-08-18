@@ -3,7 +3,11 @@
 # dependencies = []
 # ///
 """
-purge.py — delete old exam sessions, and the identity photos that came with them.
+purge.py — delete old exam sessions, and every image that came with them.
+
+That is the two identity photos, the last live thumbnails, and all the kept frames:
+session_files() in the schema lists them together, so a snapshot cannot be left behind
+as an orphan nobody can name any more.
 
 Retention is the part of a proctoring system that people skip, so this is a single
 command a proctor can run — or put on a cron — once grades are in:
@@ -92,8 +96,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if not args.yes:
-        print("\nThis permanently deletes those sessions, their ID photos and "
-              "check-in photos.")
+        print("\nThis permanently deletes those sessions, their ID photos, their "
+              "check-in photos and every kept frame.")
         if input('Type "delete" to confirm: ').strip().lower() != "delete":
             print("cancelled")
             return 1

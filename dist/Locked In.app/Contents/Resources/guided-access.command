@@ -74,6 +74,16 @@ for candidate in "$SCRIPT_DIR/lockedin_cloud.py" "$SCRIPT_DIR/../src/lockedin_cl
 	if [[ -f "$candidate" ]]; then CLOUD_PY="$candidate"; break; fi
 done
 
+# The floating "End exam" pill. Built by macos/build.sh, so it exists inside the
+# .app bundle and in macos/.build for anyone running from a clone. Missing is not an
+# error: the lockdown then behaves exactly as it did before it existed, and quitting
+# Chrome is still the way out.
+OVERLAY_BIN=""
+for candidate in "$SCRIPT_DIR/LockedInOverlay" "$SCRIPT_DIR/.build/LockedInOverlay" \
+                 "$SCRIPT_DIR/../macos/.build/LockedInOverlay"; do
+	if [[ -x "$candidate" ]]; then OVERLAY_BIN="$candidate"; break; fi
+done
+
 # uv reads the dependency block inside recorder.py and installs them on first run, so
 # it is much the better runner; a plain python3 works if the packages are already
 # installed. Double-clicked apps don't always inherit a login shell PATH, hence the
@@ -362,6 +372,10 @@ cleanup() {
 	scrub_token
 	remove_policy
 	kill "$KEEPALIVE_PID" 2>/dev/null
+	# The pill outlives the AppleScript on any path that is not a clean exit, and a
+	# floating "End exam" button over an unlocked machine would be a puzzle.
+	[[ -n "${OVERLAY_PID:-}" ]] && kill "$OVERLAY_PID" 2>/dev/null
+	rm -f "${RELEASE_FILE:-}" "${PROMPT_FILE:-}" 2>/dev/null
 	killall "Google Chrome" 2>/dev/null
 }
 trap cleanup EXIT INT TERM
@@ -413,7 +427,23 @@ if [[ "$PROCTORED" == true && -n "$LIVE_EXAM_ID" && -n "$CLOUD_PY" ]]; then
 	echo "Exit code: this exam's own (the machine passcode still works if the network drops)"
 fi
 
-osascript - "$ALLOWED_URL" "$VERIFY_CMD" "${ALLOW_HOSTS[@]}" <<'APPLESCRIPT'
+# Two files the overlay and the AppleScript loop talk through. RELEASE means "a
+# correct code was typed into the pill, let them out"; PROMPTING means "the code
+# prompt is open, stop pulling focus back to Chrome for a moment".
+RELEASE_FILE="$SESSION_DIR/RELEASE"
+PROMPT_FILE="$SESSION_DIR/PROMPTING"
+rm -f "$RELEASE_FILE" "$PROMPT_FILE"
+OVERLAY_PID=""
+if [[ -n "$OVERLAY_BIN" ]]; then
+	"$OVERLAY_BIN" "$VERIFY_CMD" "$RELEASE_FILE" "$PROMPT_FILE" \
+		>"$SESSION_DIR/overlay.log" 2>&1 &
+	OVERLAY_PID=$!
+	echo "Floating exit button: on (drag it anywhere; click it to enter the code)"
+else
+	echo "Floating exit button: not built — quit Chrome to be asked for the code"
+fi
+
+osascript - "$ALLOWED_URL" "$VERIFY_CMD" "$RELEASE_FILE" "$PROMPT_FILE" "${ALLOW_HOSTS[@]}" <<'APPLESCRIPT'
 
 -- Pipe the entry into the verifier on stdin (never as an argument — arguments are
 -- visible to every other process). A non-zero exit raises, which means "wrong".
@@ -426,13 +456,26 @@ on passcodeAccepted(entry, verifyCmd)
 	end try
 end passcodeAccepted
 
+-- POSIX file / "exists" is fussy about paths that do not exist yet, so ask the
+-- shell instead: it is one process every 0.3s and it never raises.
+on fileExists(path)
+	try
+		do shell script "test -e " & quoted form of path
+		return true
+	on error
+		return false
+	end try
+end fileExists
+
 on run argv
 	set allowedURL to item 1 of argv
 	set verifyCmd to item 2 of argv
+	set releaseFile to item 3 of argv
+	set promptFile to item 4 of argv
 	set targetApp to "Google Chrome"
-	-- allowed hosts = every arg from the third onward
+	-- allowed hosts = every arg from the fifth onward
 	set allowedHosts to {}
-	repeat with i from 3 to (count of argv)
+	repeat with i from 5 to (count of argv)
 		set end of allowedHosts to item i of argv
 	end repeat
 
@@ -469,6 +512,15 @@ on run argv
 	-- ---------- Lockdown loop ----------
 	repeat
 		try
+			-- The floating pill got a correct code. Same ending as the passcode
+			-- dialog below: put everything back and stop.
+			if my fileExists(releaseFile) then
+				try
+					tell application "System Events" to set visible of (every application process whose background only is false) to true
+				end try
+				exit repeat
+			end if
+
 			set runningNames to {}
 			tell application "System Events"
 				set runningNames to name of (every application process whose background only is false)
@@ -511,7 +563,10 @@ on run argv
 				tell application "System Events"
 					set frontApp to name of first application process whose frontmost is true
 				end tell
-				if frontApp is not targetApp then
+				-- While the pill's code prompt is open, leave focus alone: pulling
+				-- Chrome back to the front every 0.3s would eat the keystrokes of
+				-- whoever is typing the code.
+				if frontApp is not targetApp and not my fileExists(promptFile) then
 					repeat with pName in runningNames
 						set pName to pName as string
 						if pName is not targetApp then

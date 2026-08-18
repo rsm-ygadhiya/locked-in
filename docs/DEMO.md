@@ -96,13 +96,20 @@ the live grid within a few seconds.
 Try to get out. Close Chrome and it comes back asking for a code. Try a blocked site
 and watch the event show up in the student's timeline on the dashboard.
 
-To end it: type the **exit code** from step 1 — which is checked by the server and
-never reaches the student's machine — or the local passcode `admin`, which is the
-deliberate fallback for when the network is down. Chrome goes back to normal, the
+To end it: click the floating **End exam** pill — drag it anywhere first, it stays
+where you put it — and type the **exit code** from step 1, which is checked by the
+server and never reaches the student's machine. Quitting Chrome asks for the same
+thing, and the local passcode `admin` works either way, as the deliberate fallback for
+when the network is down. Chrome goes back to normal, the
 policy is removed, and the recording is finalized on the Desktop under
 `LockedIn-Recordings/`.
 
 ## 4. The part IT usually asks about
+
+Then look at the dashboard again: the student is under **Finished**, with how long they
+sat and how many frames were kept. **Review** opens their identity photos, a filmstrip
+of everything kept during the exam, and their timeline. That is what survives the exam,
+and it survives until somebody presses **Delete exam**.
 
 **What leaves the machine.** In standalone mode, nothing at all. In proctored mode:
 two identity photos once, then two ~10 KB thumbnails per student overwritten in place

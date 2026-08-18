@@ -478,6 +478,26 @@ class Cloud:
                    headers={"Prefer": "resolution=merge-duplicates,return=minimal"})
 
 
+    def put_snapshot(self, session_id: str, kind: str, jpeg: bytes) -> str:
+        """
+        Keep one frame, rather than overwriting the live tile.
+
+        Same bucket and the same session-id prefix as the live tiles, so the
+        storage policies already cover it, but under snap/ with a timestamp in the
+        name so nothing is ever replaced. The row is what makes the file findable
+        again — and therefore deletable, which is the part that matters when the
+        proctor deletes the exam.
+        """
+        stamp = int(time.time() * 1000)
+        path = f"{session_id}/snap/{stamp}-{kind}.jpg"
+        self.upload("live", path, jpeg, "image/jpeg", upsert=False)
+        self._json("POST", "/rest/v1/snapshots",
+                   payload={"session_id": session_id, "kind": kind,
+                            "storage_path": path, "captured_at": _now_iso()},
+                   headers={"Prefer": "return=minimal"})
+        return path
+
+
 def _now_iso() -> str:
     import datetime as dt
     return dt.datetime.now(dt.timezone.utc).isoformat()

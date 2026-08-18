@@ -87,6 +87,14 @@ DEFAULT_CLOUD = {
     # keeps a class inside a free tier.
     "live_interval": 3.0,
     "live_width": 640,
+    # How often one of those thumbnails is also *kept*, instead of being
+    # overwritten by the next one. Kept frames are what the proctor reviews after
+    # the exam, and they live until the exam is deleted. 0 turns it off.
+    #
+    # This is the setting that spends the free tier's 1 GB: 40 students for two
+    # hours at one a minute is roughly 500 MB. Raising the cadence is expensive in
+    # a way the live interval is not, because nothing here is ever overwritten.
+    "snapshot_interval": 60.0,
 }
 
 

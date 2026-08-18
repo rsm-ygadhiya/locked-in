@@ -325,16 +325,28 @@ class AdminPanel(tk.Tk):
         self.live_width.grid(row=0, column=2)
         ttk.Label(live, text="px wide").grid(row=0, column=3, padx=6)
 
+        # Kept frames are the ones that outlive the exam, so this is the number
+        # that decides how much of the free tier an exam costs.
+        ttk.Label(tab, text="Keep a frame").grid(row=10, column=0, sticky="e", **PAD)
+        keep = ttk.Frame(tab)
+        keep.grid(row=10, column=1, sticky="w", **PAD)
+        self.snapshot_interval = ttk.Spinbox(keep, from_=0, to=600, increment=15,
+                                             width=6)
+        self.snapshot_interval.set(float(cloud.get("snapshot_interval") or 0.0))
+        self.snapshot_interval.grid(row=0, column=0)
+        ttk.Label(keep, text="seconds apart, kept until the exam is deleted "
+                             "(0 keeps none)").grid(row=0, column=1, padx=6)
+
         ttk.Label(tab, text="The anon key is meant to be public — it ships inside this\n"
                             "app. Access is enforced by the database policies in\n"
                             "server/schema.sql. Never paste the service_role key here.",
-                  foreground="#555").grid(row=10, column=0, columnspan=3, sticky="w",
+                  foreground="#555").grid(row=12, column=0, columnspan=3, sticky="w",
                                           **PAD)
 
         self.cloud_status = ttk.Label(tab, text="", foreground="#555")
-        self.cloud_status.grid(row=11, column=1, sticky="w", padx=12)
+        self.cloud_status.grid(row=13, column=1, sticky="w", padx=12)
         ttk.Button(tab, text="Test the connection", command=self._test_cloud) \
-            .grid(row=11, column=0, sticky="e", **PAD)
+            .grid(row=13, column=0, sticky="e", **PAD)
         return tab
 
     # ---------- serving the dashboard on the local network ----------
@@ -510,6 +522,8 @@ class AdminPanel(tk.Tk):
         try:
             cloud["live_interval"] = max(1.0, float(self.live_interval.get()))
             cloud["live_width"] = max(240, int(float(self.live_width.get())))
+            keep_every = float(self.snapshot_interval.get())
+            cloud["snapshot_interval"] = 0.0 if keep_every <= 0 else max(5.0, keep_every)
         except ValueError:
             messagebox.showerror("Check the live monitoring values",
                                  "The interval and width have to be numbers.")
