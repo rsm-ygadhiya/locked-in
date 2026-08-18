@@ -49,6 +49,17 @@ Settings → Privacy & Security. Consequences worth knowing:
 right-click → **Open** → **Open**. Distributing it to a lab means either doing that on
 each machine, or signing it with a paid Developer ID.
 
+### On Windows
+
+**The Windows half has not been tested.** Both platforms read the same settings file and
+run the same Python helpers, and the Windows launcher and lockdown were written to match
+the macOS ones step for step — but they have not been run against a real Windows
+machine. Nobody should plan a class around them without someone sitting down at a
+Windows box first and going through the whole flow. The parts most likely to need work,
+in order of suspicion: the self-elevating UAC prompt, the Chrome registry policy paths,
+camera and microphone access for a desktop app, and whether `mshta` runs at all under
+your endpoint policy — which is the next item.
+
 ### The Windows launcher is an HTA
 
 `LockedIn.hta` runs under `mshta.exe`, which is legacy Windows scripting. Plenty of

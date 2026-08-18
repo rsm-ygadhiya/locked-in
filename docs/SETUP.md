@@ -146,10 +146,13 @@ Then get it in front of a browser. In rough order of effort:
   pick if you want to watch from somewhere other than the machine holding the file.
 - **Just open the file.** Double-click it. Works immediately, and is fine if you
   proctor from one machine and one machine only.
-- **GitHub Pages.** Push this repo, enable Pages, and the dashboard is at a URL any
-  proctor can open from anywhere. Remember the anon key is in the page — that is
-  expected, but it does mean the page should not carry anything else you consider
-  private.
+- **GitHub Pages.** Push this repo, then **Settings → Pages → Deploy from a branch →
+  `main` / `/ (root)`**, and the dashboard is at a URL any proctor can open from
+  anywhere, with nothing to install and nothing to run. The repo root carries an
+  `index.html` that redirects to `server/dashboard/` and a `.nojekyll` marker, so the
+  address is just `https://<user>.github.io/<repo>/`. Remember the anon key is in the
+  page — that is expected, but it does mean the page should not carry anything else you
+  consider private, and that whoever holds a proctor account can sign in from anywhere.
 - **Supabase Storage.** Create a public bucket, upload `index.html`, use its public
   URL.
 

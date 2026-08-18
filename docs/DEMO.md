@@ -25,6 +25,10 @@ why the project they belong to must never run a real exam** — see
   curl -LsSf https://astral.sh/uv/install.sh | sh     # macOS
   winget install --id=astral-sh.uv -e                 # Windows
   ```
+- **A Mac.** The whole of this has been run end to end on macOS only. The Windows
+  launcher and lockdown are written and share the same settings and helpers, but have
+  not been tested on a real Windows machine — if that is what you have, expect to be
+  the first person to find out what is wrong with it.
 - A machine you don't mind having its browser taken over for two minutes. The lockdown
   always cleans up after itself, including on a crash, but it is a fair thing to want
   to be sure of before you start.
@@ -76,7 +80,7 @@ On the same machine, or a different one:
 
 **macOS** — double-click `dist/Locked In.app`. First time only, right-click → **Open**
 → **Open**, because the app is ad-hoc signed rather than notarized.
-**Windows** — double-click `windows/LockedIn.hta`.
+**Windows** — double-click `windows/LockedIn.hta`. Untested; see the note in step 0.
 
 Then: **Student** → sign in as `student` / `student123` → type the join code → read the
 recording notice → agree → photograph an ID (any card will do) → take a check-in photo

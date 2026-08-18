@@ -19,7 +19,15 @@ It runs in either of two modes:
 > problems](docs/TROUBLESHOOTING.md#known-problems) — and use an official proctoring
 > tool (Respondus / Proctorio / Honorlock) if you need real integrity guarantees.
 
-![platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-black)
+![platform](https://img.shields.io/badge/macOS-tested-brightgreen)
+![platform](https://img.shields.io/badge/Windows-written%2C%20not%20tested-orange)
+
+> **Tested on macOS only.** Everything here has been run end to end on an Apple-silicon
+> Mac. The Windows half — `LockedIn.hta` and `guided-access.ps1` — is written to do the
+> same things and shares the same settings file and the same Python helpers, but it has
+> not been run against a real Windows machine. Treat it as a starting point that needs a
+> pass from someone with a Windows box, not as a shipped feature. See [what to expect on
+> Windows](docs/TROUBLESHOOTING.md#on-windows).
 
 ---
 
@@ -192,6 +200,8 @@ recorder reports that it can't start, that is almost always the missing piece.
 To exit: quit Chrome (⌘Q), then enter the passcode.
 
 ### Windows
+
+Untested — see the note at the top. What follows is what it is written to do.
 
 1. Keep **`LockedIn.hta`**, **`guided-access.ps1`** and the `.py` files together
    (the `.py` files may sit in the folder above, as they do in this repo).
