@@ -222,6 +222,28 @@ whatever was typed into the file, which is the copy that drifts.
 button in Faculty → Exam settings → Proctoring. It keeps running after the panel and
 the launcher close, which is the point — it should outlive them, not the exam.
 
+### Exams
+
+**"Could not create it" when you press Create.** Almost always the join code: they are
+unique across the entire project, not per proctor, so a code another proctor used —
+`1111`, `TEST`, `DEMO` — is refused. The dashboard now says so in those words; older
+copies showed the raw database error. Pick a less obvious code.
+
+**An exam appears that you did not create.** Fixed. The dashboard used to list every
+exam it could *read*, and open exams are readable by anyone signed in, so other
+proctors' exams showed up in the picker — and then Delete, Close the door and Exit code
+all failed against them, because those are owner-only. It now lists only your own.
+
+**The exit code says "set, not readable".** That project's database predates readable
+exit codes. Re-run `server/schema.sql` on it; it is idempotent, adds the column, and
+does not touch existing exams. Until then you can set a new code but not look up the
+old one.
+
+**Deleting an exam does nothing.** You can only delete exams you own. If Delete fails
+with a policy error on an exam that looks like yours, check which account created it —
+`Your exams` only shows your own, so an exam missing from that list belongs to another
+proctor.
+
 ### Sign-in and accounts
 
 **`500 Database error querying schema` on every sign-in for one account.** That account

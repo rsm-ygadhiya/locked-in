@@ -215,9 +215,15 @@ Clearing them returns the machine to standalone mode.
 **Proctor**, a few minutes before:
 
 1. Open the dashboard, sign in.
-2. **New exam** — title, the one site students are allowed, a short **join code**,
+2. **Add an exam** — title, the one site students are allowed, a short **join code**,
    and an **exit code**.
 3. Read the **join code** out to the room. Keep the **exit code** to yourself.
+
+**Your exams** lists everything you own, with both codes on the row: **Show code**
+reveals the exit code, **Change** sets a new one, **Watch** points the live grid at
+that exam, and **Delete** removes it along with every photo and kept frame. Only your
+own exams appear there — join codes, though, are unique across the whole project, so a
+code another proctor is already using is refused.
 
 The two codes do different jobs, and mixing them up defeats the point:
 
@@ -226,10 +232,17 @@ The two codes do different jobs, and mixing them up defeats the point:
 | **Join code** | the whole room | lets a student request a seat |
 | **Exit code** | proctors only | ends the lockdown on a student's machine |
 
-The exit code is stored only as a hash, and is checked by the server — it is never
-sent to a student's computer, so it cannot be read off their laptop no matter what
-they do to it. Each exam has its own, and changing it takes effect immediately on
-every machine running that exam.
+The exit code is checked by the server and never sent to a student's computer, so it
+cannot be read off their laptop no matter what they do to it. Each exam has its own,
+and changing it takes effect immediately on every machine running that exam.
+
+You can look it up later. **Your exams** at the top of the dashboard lists every exam
+you own with both codes: the join code in the open, the exit code behind **Show code**.
+Two things follow from that, and both are deliberate. The code lives in
+`exam_secrets`, a table with no student-facing policy whatsoever — a student's app can
+only ask *is this code right*, never *what is the code*. And a proctor account that
+gets taken over now hands over the exit codes for that proctor's own exams, which is
+the price of not having to reset a code every time somebody forgets it.
 
 If the network is down when you try to release a machine, the check falls back to
 that machine's local passcode (Faculty → Exam settings → Security). That fallback is

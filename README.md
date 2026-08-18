@@ -87,7 +87,8 @@ And in proctored mode:
 | **Stale detection** | A student whose app stops checking in turns red rather than showing a frozen image |
 | **Event timeline** | Per-student log of check-in, start, blocked sites and exit |
 | **Students can't self-admit** | Enforced by a database trigger, not by the app asking nicely |
-| **Per-exam exit code** | A code only proctors know ends the lockdown; checked server-side, so it never reaches the student's machine |
+| **Per-exam exit code** | A code only proctors know ends the lockdown; checked server-side, so it never reaches the student's machine — and you can look it up again behind **Show code** |
+| **Exams you can manage** | Add and delete exams from the dashboard, with both codes on the row and only your own exams listed |
 | **Proctors add proctors** | From the dashboard; a student cannot promote themselves |
 | **Kept frames** | A snapshot every minute is stored and survives the exam, so there is something to review afterwards rather than only a live grid |
 | **Finished list** | Students who ended, with how long they sat, their photos and their kept frames |

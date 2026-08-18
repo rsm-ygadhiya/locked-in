@@ -150,6 +150,25 @@
   /* Kept frames. One scrolling row per stream, newest first — a proctor reviewing
      an exam is looking for the moment something changed, and a strip they can drag
      through beats a wall of thumbnails they have to read in order. */
+  /* One row per exam: the two codes are the whole point of the row, so they are
+     the biggest thing in it. */
+  .exam { display: flex; gap: 14px; align-items: center; flex-wrap: wrap;
+          padding: 12px 0; border-bottom: 1px solid var(--line); }
+  .exam:last-child { border-bottom: 0; }
+  .exam .who2 { min-width: 190px; flex: 1 1 190px; }
+  .exam .t { font-weight: 600; }
+  .exam .sub { color: var(--muted); font-size: 12px; }
+  .code { display: flex; flex-direction: column; gap: 2px; min-width: 132px; }
+  .code .lbl { color: var(--muted); font-size: 11px; text-transform: uppercase;
+               letter-spacing: .06em; }
+  .code .val { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+               font-size: 17px; letter-spacing: .08em; }
+  .code .val.hidden-code { color: var(--muted); }
+  .exam .acts { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+  .pill { border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px;
+          font-size: 11px; color: var(--muted); }
+  .pill.open { color: var(--accent); border-color: var(--accent); }
+
   .strip { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 6px; }
   .strip .snap { margin: 0; flex: 0 0 auto; width: 168px; }
   .strip .snap img { width: 100%; border-radius: 8px; background: #000;
@@ -245,6 +264,17 @@
   <main>
     <div id="noProject" class="banner" hidden></div>
 
+    <section id="examsCard" class="card">
+      <div class="row" style="align-items:baseline;margin-bottom:14px">
+        <h2 style="margin:0">Your exams (<span id="examCount">0</span>)</h2>
+        <button class="ghost small" id="addExamBtn" style="margin-left:auto">Add an exam</button>
+      </div>
+      <p id="examsStale" class="banner" hidden></p>
+      <div id="examList"></div>
+      <p id="examsEmpty" class="empty">No exams yet. <b>Add an exam</b> to make one —
+        you read the join code out to the room, and keep the exit code to yourself.</p>
+    </section>
+
     <section id="newExam" class="card" hidden>
       <h2 style="margin-bottom:16px">Create an exam</h2>
       <div class="row">
@@ -265,9 +295,9 @@
       </div>
       <p style="color:var(--muted);font-size:13px;margin-bottom:12px">
         The exit code is what you type on a student's machine to end their lockdown.
-        It is stored only as a hash and is never sent to their computer, so nobody
-        can read it off their laptop. Leave it blank and the lockdown falls back to
-        that machine's own passcode.
+        It never reaches their computer — the check happens on the server — so nobody
+        can read it off their laptop. You can look it up here later. Leave it blank
+        and the lockdown falls back to that machine's own passcode.
       </p>
       <div class="row">
         <button id="createExamBtn">Create</button>
@@ -551,8 +581,15 @@ async function loadMe() {
 // ===========================================================================
 // Exams
 // ===========================================================================
+// Only this proctor's own exams. It used to list everything readable, and open
+// exams are readable by everyone signed in — so another proctor's exam appeared in
+// the picker, and then Delete, Close the door and Exit code all failed against it
+// for reasons the page could not explain.
 async function loadExams() {
-  exams = await call("/rest/v1/exams?select=*&order=created_at.desc") || [];
+  exams = await call(`/rest/v1/exams?select=*&faculty_id=eq.${me.id}` +
+                     "&order=created_at.desc") || [];
+  await loadExitCodes();
+  paintExams();
   const pick = $("examPick");
   pick.innerHTML = "";
   if (!exams.length) {
@@ -571,6 +608,102 @@ async function loadExams() {
     pick.value = currentExam.id;
   }
   paintOpenButton();
+}
+
+// exam_secrets has no student-facing policy at all, so this only ever returns the
+// codes for exams the signed-in proctor owns. An exam with no exit code has no row.
+let exitCodes = {};
+let revealed = new Set();
+let codesReadable = true;
+
+async function loadExitCodes() {
+  exitCodes = {};
+  codesReadable = true;
+  if (!exams.length) return;
+  const ids = `(${exams.map((e) => e.id).join(",")})`;
+  try {
+    const rows = await call("/rest/v1/exam_secrets?select=exam_id,exit_code" +
+                            `&exam_id=in.${encodeURIComponent(ids)}`) || [];
+    for (const row of rows) { exitCodes[row.exam_id] = row.exit_code || ""; }
+  } catch (error) {
+    // A project whose schema.sql predates readable exit codes has no exit_code
+    // column, and asking for it is a 400. That must not take the whole dashboard
+    // down — an exam still runs, you just cannot look the code up.
+    codesReadable = false;
+    console.warn("exit codes unavailable:", error.message);
+  }
+}
+
+function paintExams() {
+  $("examCount").textContent = exams.length;
+  const stale = $("examsStale");
+  if (stale) {
+    stale.hidden = codesReadable || !exams.length;
+    stale.textContent = "This project's database predates readable exit codes, so "
+      + "the codes cannot be shown. Run server/schema.sql on it again — it is "
+      + "idempotent, and it adds the column without touching your exams.";
+  }
+  $("examsEmpty").hidden = exams.length > 0;
+  const list = $("examList");
+  list.innerHTML = "";
+
+  for (const exam of exams) {
+    const code = exitCodes[exam.id];
+    const shown = revealed.has(exam.id);
+    // An exam created before exit codes existed, or created without one, has
+    // nothing to reveal — say which rather than showing empty dots.
+    const exitCell = !codesReadable
+      ? `<span class="val hidden-code" title="Run server/schema.sql on this project again">set, not readable</span>`
+      : code === undefined || code === ""
+      ? `<span class="val hidden-code">not set</span>`
+      : `<span class="val${shown ? "" : " hidden-code"}">${
+           shown ? escapeHtml(code) : "•".repeat(Math.max(4, code.length))}</span>`;
+
+    const row = document.createElement("div");
+    row.className = "exam";
+    row.innerHTML = `
+      <div class="who2">
+        <div class="t">${escapeHtml(exam.title)}</div>
+        <div class="sub">${escapeHtml(exam.allowed_url)}</div>
+      </div>
+      <div class="code">
+        <span class="lbl">Join code · read out</span>
+        <span class="val">${escapeHtml(exam.join_code)}</span>
+      </div>
+      <div class="code">
+        <span class="lbl">Exit code · yours only</span>
+        ${exitCell}
+      </div>
+      <span class="pill${exam.is_open ? " open" : ""}">${
+        exam.is_open ? "open" : "closed"}</span>
+      <div class="acts">
+        ${codesReadable && code !== undefined && code !== ""
+          ? `<button class="small ghost" onclick="toggleCode('${exam.id}')">${
+               shown ? "Hide code" : "Show code"}</button>
+             <button class="small ghost" onclick="changeExitCode('${exam.id}')">Change</button>`
+          : `<button class="small ghost" onclick="changeExitCode('${exam.id}')">${
+               codesReadable ? "Set exit code" : "Set a new one"}</button>`}
+        <button class="small ghost" onclick="selectExam('${exam.id}')">Watch</button>
+        <button class="small bad" onclick="deleteExam('${exam.id}')">Delete</button>
+      </div>`;
+    list.appendChild(row);
+  }
+}
+
+function toggleCode(examId) {
+  if (revealed.has(examId)) { revealed.delete(examId); } else { revealed.add(examId); }
+  paintExams();
+}
+
+// Switch the live grid and the queue to another exam without touching the picker
+// by hand — the row's own button is where people look for it.
+function selectExam(examId) {
+  const exam = exams.find((e) => e.id === examId);
+  if (!exam) return;
+  currentExam = exam;
+  $("examPick").value = examId;
+  paintOpenButton();
+  refresh();
 }
 
 function paintOpenButton() {
@@ -612,11 +745,19 @@ async function createExam() {
     $("examExit").value = "";
     await loadExams();
     $("examPick").value = currentExam.id;
+    if (exit) { revealed.add(currentExam.id); }
+    paintExams();
     toast(`Created. Read out the join code: ${currentExam.join_code}`);
     refresh();
   } catch (error) {
-    // The unique constraint on join_code is the usual cause here.
-    toast("Could not create it: " + error.message, true);
+    // Join codes are unique across the whole project, not per proctor, so the
+    // usual failure is a code somebody else's exam already holds — and the raw
+    // constraint error does not say that in any language a person speaks.
+    const message = /duplicate key|unique constraint|23505/i.test(error.message)
+      ? `The join code ${code} is already taken. Codes are shared across every ` +
+        "proctor on this project, so try a less obvious one."
+      : "Could not create it: " + error.message;
+    toast(message, true);
   }
 }
 
@@ -628,17 +769,21 @@ async function setExitCode(examId, code) {
   });
 }
 
-async function changeExitCode() {
-  if (!currentExam) return;
+async function changeExitCode(examId) {
+  const exam = exams.find((e) => e.id === examId) || currentExam;
+  if (!exam) return;
   const code = prompt(
-    `Exit code for "${currentExam.title}".\n\n` +
-    "This is what you type on a student's machine to end their lockdown. It is " +
-    "stored as a hash and never sent to their computer.\n\n" +
+    `Exit code for "${exam.title}".\n\n` +
+    "This is what you type on a student's machine to end their lockdown. It never " +
+    "reaches their computer — the check happens on the server — and you can look it " +
+    "up here afterwards.\n\n" +
     "At least 4 characters. Leave blank to cancel.");
   if (!code) return;
   if (code.trim().length < 4) return toast("An exit code needs at least 4 characters.", true);
   try {
-    await setExitCode(currentExam.id, code.trim());
+    await setExitCode(exam.id, code.trim());
+    revealed.add(exam.id);          // they just typed it; no point hiding it now
+    await loadExams();
     toast("Exit code set. It applies to every machine running this exam.");
   } catch (error) { toast("Could not set it: " + error.message, true); }
 }
@@ -646,12 +791,13 @@ async function changeExitCode() {
 // Deleting an exam takes its sessions with it by cascade — which means the files
 // have to go FIRST, through the Storage API. Once a session row is gone nothing can
 // authorise deleting the images it owned, and they are unreachable forever.
-async function deleteExam() {
-  if (!currentExam) return;
+async function deleteExam(examId) {
+  const target = exams.find((e) => e.id === examId) || currentExam;
+  if (!target) return;
   const sessions = await call(
-    `/rest/v1/sessions?select=id&exam_id=eq.${currentExam.id}`) || [];
+    `/rest/v1/sessions?select=id&exam_id=eq.${target.id}`) || [];
   const warning =
-    `Delete "${currentExam.title}" (${currentExam.join_code})?\n\n` +
+    `Delete "${target.title}" (${target.join_code})?\n\n` +
     `This also deletes ${sessions.length} student session(s), their ID photos, ` +
     "their check-in photos, every kept frame and their event history. It cannot " +
     "be undone.\n\n" +
@@ -662,9 +808,9 @@ async function deleteExam() {
 
   try {
     for (const s of sessions) { await deleteSessionFiles(s.id); }
-    await call(`/rest/v1/exams?id=eq.${currentExam.id}`, { method: "DELETE" });
+    await call(`/rest/v1/exams?id=eq.${target.id}`, { method: "DELETE" });
     signedCache.clear();
-    currentExam = null;
+    if (currentExam && currentExam.id === target.id) { currentExam = null; }
     await loadExams();
     toast("Exam deleted.");
     refresh();
@@ -1179,11 +1325,15 @@ $("loginPw").onkeydown = (e) => { if (e.key === "Enter") signIn(); };
 $("loginId").onkeydown = (e) => { if (e.key === "Enter") signIn(); };
 $("signOut").onclick = (e) => { e.preventDefault(); signOut(); };
 $("newExamBtn").onclick = () => { $("newExam").hidden = !$("newExam").hidden; };
+$("addExamBtn").onclick = () => {
+  $("newExam").hidden = false;
+  $("examTitle").focus();
+};
 $("cancelExamBtn").onclick = () => { $("newExam").hidden = true; };
 $("createExamBtn").onclick = createExam;
 $("toggleOpenBtn").onclick = toggleOpen;
-$("exitCodeBtn").onclick = changeExitCode;
-$("deleteExamBtn").onclick = deleteExam;
+$("exitCodeBtn").onclick = () => changeExitCode(currentExam && currentExam.id);
+$("deleteExamBtn").onclick = () => deleteExam(currentExam && currentExam.id);
 $("addProctorBtn").onclick = () => {
   $("addProctor").hidden = !$("addProctor").hidden;
   $("proctorNote").textContent = "";

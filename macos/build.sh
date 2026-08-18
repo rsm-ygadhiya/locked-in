@@ -33,15 +33,24 @@ if [[ "${1:-}" == "--icon" ]]; then
 fi
 
 # ---------- compile the launcher ----------
-echo "==> compiling main.swift"
 mkdir -p "$BUILD"
-swiftc -O "$HERE/src/main.swift" -o "$BUILD/LockedIn"
+
+# Compile from a copy outside the project, not from src/ in place. On an
+# iCloud-synced Desktop the file provider touches the sources while swiftc is
+# reading them, and swiftc fails the build outright with "input file was modified
+# during the build". A staging directory under /tmp is not synced by anything.
+STAGE="$(mktemp -d "${TMPDIR:-/tmp}/lockedin-build-XXXXXX")"
+trap 'rm -rf "$STAGE"' EXIT
+cp "$HERE/src/main.swift" "$HERE/src/overlay.swift" "$STAGE/"
+
+echo "==> compiling main.swift"
+swiftc -O "$STAGE/main.swift" -o "$BUILD/LockedIn"
 
 # The floating "End exam" pill the lockdown draws over Chrome. Separate binary
 # rather than part of the launcher: the launcher has quit long before it is needed,
 # and this one has to run as an accessory app so the lockdown leaves it alone.
 echo "==> compiling overlay.swift"
-swiftc -O "$HERE/src/overlay.swift" -o "$BUILD/LockedInOverlay"
+swiftc -O "$STAGE/overlay.swift" -o "$BUILD/LockedInOverlay"
 
 # ---------- assemble the bundle ----------
 echo "==> assembling $APP"

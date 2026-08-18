@@ -87,9 +87,17 @@ create index if not exists exams_faculty_idx on public.exams (faculty_id);
 -- readable by every student in the room. A separate table with its own policy is
 -- what keeps the exit code out of their reach.
 --
--- Only the hash is stored, via pgcrypto's crypt(), so the code cannot be read
--- back out even by the proctor who set it. Verification goes through
--- verify_exit_code() below, which answers yes or no and never returns the hash.
+-- The hash is what verification uses, via pgcrypto's crypt(): verify_exit_code()
+-- below answers yes or no and the hash never leaves the database.
+--
+-- exit_code holds the code itself, and exists so a proctor can look up the code
+-- for their own exam weeks later instead of having to reset it. That is a
+-- deliberate loosening of an earlier design where nobody could read it back, and
+-- the reason it is defensible is that this table has no student-facing policy at
+-- all: a student's app learns whether a typed code is right by calling
+-- verify_exit_code(), and cannot select from here at any price. What it costs is
+-- that a proctor account taken over hands the attacker every exit code they own,
+-- where before it handed them nothing.
 -- ---------------------------------------------------------------------------
 
 create table if not exists public.exam_secrets (
@@ -97,6 +105,10 @@ create table if not exists public.exam_secrets (
     exit_code_hash text        not null,
     updated_at     timestamptz not null default now()
 );
+
+-- Added after the table existed, so it has to be an alter rather than a column
+-- in the create above: re-running this file must not drop anybody's exams.
+alter table public.exam_secrets add column if not exists exit_code text;
 
 
 -- ---------------------------------------------------------------------------
@@ -439,10 +451,12 @@ begin
         raise exception 'an exit code needs at least 4 characters';
     end if;
 
-    insert into public.exam_secrets (exam_id, exit_code_hash, updated_at)
-    values (p_exam, crypt(btrim(p_code), gen_salt('bf')), now())
+    insert into public.exam_secrets (exam_id, exit_code_hash, exit_code, updated_at)
+    values (p_exam, crypt(btrim(p_code), gen_salt('bf')), btrim(p_code), now())
     on conflict (exam_id) do update
-        set exit_code_hash = excluded.exit_code_hash, updated_at = now();
+        set exit_code_hash = excluded.exit_code_hash,
+            exit_code      = excluded.exit_code,
+            updated_at     = now();
 end;
 $$;
 
