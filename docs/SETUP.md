@@ -22,7 +22,7 @@ You need: a Supabase account (free, no card), and the ability to run one SQL scr
 ## 2. Create the tables
 
 1. In the project, open **SQL Editor** → **New query**.
-2. Paste the entire contents of [`schema.sql`](schema.sql) and press **Run**.
+2. Paste the entire contents of [`server/schema.sql`](../server/schema.sql) and press **Run**.
 3. It should finish with *Success. No rows returned*.
 
 That creates six tables, the Row Level Security policies that decide who can see
@@ -39,7 +39,7 @@ into someone else's folder, forging the proctor's decision:
 
 ```bash
 brew install postgresql@16 && brew services start postgresql@16
-./cloud/test/run_tests.sh
+./server/tests/run_tests.sh
 ```
 
 It uses a throwaway database and never touches your Supabase project.
@@ -128,7 +128,7 @@ the check-in screen and land as students automatically.
 
 ## 6. Publish the dashboard
 
-`dashboard/index.html` is one self-contained file. Open it in an editor and fill in
+`server/dashboard/index.html` is one self-contained file. Open it in an editor and fill in
 the two constants at the top of the `<script>` block:
 
 ```js
@@ -139,8 +139,13 @@ const ID_EMAIL_DOMAIN   = "ucsd.edu";
 
 Then get it in front of a browser. In rough order of effort:
 
+- **Serve it on your wi-fi.** Faculty → Exam settings → Proctoring → **Serve on this
+  network**, or `uv run --script server/serve.py`. Prints an address like
+  `http://192.168.1.23:8765/` that any device on the same network can open — your
+  phone, a tablet, the laptop you actually want to sit behind. This is the one to
+  pick if you want to watch from somewhere other than the machine holding the file.
 - **Just open the file.** Double-click it. Works immediately, and is fine if you
-  proctor from one machine.
+  proctor from one machine and one machine only.
 - **GitHub Pages.** Push this repo, enable Pages, and the dashboard is at a URL any
   proctor can open from anywhere. Remember the anon key is in the page — that is
   expected, but it does mean the page should not carry anything else you consider
@@ -149,12 +154,35 @@ Then get it in front of a browser. In rough order of effort:
   URL.
 
 Whichever you choose, paste the address into **Faculty → Exam settings →
-Proctoring** as the dashboard address — that is what the Faculty button opens.
+Proctoring** as the dashboard address — that is what the Faculty button opens. The
+**Serve on this network** button fills that in for you.
+
+Two notes on the wi-fi option. It serves the page with the project URL and key from
+this machine's settings patched in, so the copy in the file cannot drift out of step
+with what the students are uploading to. And anyone on the network can load the page
+without signing in — the same exposure as GitHub Pages, since the anon key is public
+by design and every access rule is in the policies, but a visitor still has to sign
+in as a proctor before they see a single student. `--local-only` binds it to this
+machine; `--stop` ends it.
 
 ## 7. Point the student machines at the project
 
-On each student machine, open the Locked In launcher → **Faculty** → **Exam
-settings** → **Proctoring**. It is the same panel on Windows:
+The quick way, if the machine with the settings is running the dashboard server
+from step 6 and both are on the same network — on each other machine, in the Locked
+In folder:
+
+```bash
+uv run --script src/lockedin_config.py enroll http://192.168.1.23:8765
+```
+
+That copies the project URL, the anon key, the ID domain and the live-monitoring
+settings across, and points that machine's Faculty button at your dashboard. Nothing
+else is touched: the passcode, the allowed site and the recording choices stay as
+that machine has them. They only need to share a network for this one step — after
+it, each machine talks to Supabase on its own from wherever it is.
+
+By hand, or on a machine with no terminal: open the Locked In launcher → **Faculty**
+→ **Exam settings** → **Proctoring**. It is the same panel on Windows:
 
 - **Project URL** and **Anon key** from step 4
 - **Dashboard address** from step 6
@@ -244,9 +272,9 @@ ID photos and check-in photos are identity documents belonging to real students.
 Run the purge once grades are in:
 
 ```bash
-uv run --script cloud/purge.py --days 30 --dry-run   # see what would go
-uv run --script cloud/purge.py --days 30             # actually delete
-uv run --script cloud/purge.py --days 30 --yes       # for a cron job
+uv run --script server/purge.py --days 30 --dry-run   # see what would go
+uv run --script server/purge.py --days 30             # actually delete
+uv run --script server/purge.py --days 30 --yes       # for a cron job
 ```
 
 It signs in as a proctor and only ever touches that account's own exams. No

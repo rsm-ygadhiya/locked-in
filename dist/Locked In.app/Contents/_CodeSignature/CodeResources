@@ -10,31 +10,39 @@
 		</data>
 		<key>Resources/admin_panel.py</key>
 		<data>
-		Pvx1RvPROChzqMH9mwa+Tre9X2E=
+		X7m6A0n2FQX6aoDY155bcXePh1I=
+		</data>
+		<key>Resources/dashboard/index.html</key>
+		<data>
+		ocQzVQxZbf7spztgMKRR1A6ExGg=
 		</data>
 		<key>Resources/guided-access.command</key>
 		<data>
-		qJA5+QmiKqgV9gwh1opkcYQ/0Es=
+		WmZ6CxyArlvOvk/1IBwJ3pwfQLI=
 		</data>
 		<key>Resources/lockedin_cloud.py</key>
 		<data>
-		M9Zq7CmmCwDqrGVDkjvA6AIwi+g=
+		/IDP9Hn6R7hEBu6f1vdiy/x8pOU=
 		</data>
 		<key>Resources/lockedin_config.py</key>
 		<data>
-		P+dAdJbb2sZtAlpCx/TMg8E33lk=
+		ke7NpC+dQ+TGTBQtevCyN0cNgBo=
 		</data>
 		<key>Resources/recorder.py</key>
 		<data>
-		aPwXTwSTB9mNoueW0mz2zEuuEGc=
+		O6D4kjXurrheA+TncpjbB1cYkJw=
+		</data>
+		<key>Resources/serve.py</key>
+		<data>
+		VLHzYRtEDZd9SmW4CJ+afx3Qu7U=
 		</data>
 		<key>Resources/student_session.py</key>
 		<data>
-		zyq3BXngBb+AhqugRPiRH2KSY78=
+		a99e+CmcSmVg+rKZa3MLwx46KR8=
 		</data>
 		<key>Resources/uploader.py</key>
 		<data>
-		GRlFgLEHHHydHFaKSiJHtRe5y4Y=
+		/i72EtFg9n0qYtbsqCvRIo/ky5Q=
 		</data>
 	</dict>
 	<key>files2</key>
@@ -50,49 +58,63 @@
 		<dict>
 			<key>hash2</key>
 			<data>
-			NJRD66DqsA8ftwE5Nhb1oJ3XZktD1q3yo+rVpUspEZo=
+			hPTT0juqH9UttfV9o8whNcxN8f0L1mMhFTUY/vyKzeI=
+			</data>
+		</dict>
+		<key>Resources/dashboard/index.html</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			SUC1FiZCvwuPWz6ImOqCZ5yVF/Pr4XsCNGAKUpxohko=
 			</data>
 		</dict>
 		<key>Resources/guided-access.command</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			l0LpATHZ87JXnw6ICnQGtekDG+cztaiqar6wP2BB/Eg=
+			WkGrNZzqxZjXUFolUZapIXenxJQWnMBntiXXuiAJ4UY=
 			</data>
 		</dict>
 		<key>Resources/lockedin_cloud.py</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			+BwhtrImALVNaRG8RezBiC0TK8egGUsJ4KNad0l4+mc=
+			aJzkaYoVLI+rJci1hxkf8zBBi8AhUavVhP3qWU675hQ=
 			</data>
 		</dict>
 		<key>Resources/lockedin_config.py</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			LTuQ6MHXH+2GssnQXOA5bg+dDE0JSuhjrJq9wedo7os=
+			oTsECTJslrKPW9pKPHDD0Is9fkW6zLvvoVo/fGtkZbg=
 			</data>
 		</dict>
 		<key>Resources/recorder.py</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			NeVEaH9SdM5NPSKJYSkgcoXQfxvGj2MnxThBkieXJiU=
+			9NNHX29Mjadt+7heA8LKrga6U5jiFExb9pf6CgdtXRM=
+			</data>
+		</dict>
+		<key>Resources/serve.py</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			FRBqVl65eoaieQeqr5V0RoqX4lG/MqYmsSAbMQQoTWs=
 			</data>
 		</dict>
 		<key>Resources/student_session.py</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			1Pns6lR/seqjzFWwuyJ1CUrL12FPZXrwo1MBKNawzpM=
+			2+KLQnnjL8765DshP1BWdwmNA/SBNcGJ8eJlwbXw+So=
 			</data>
 		</dict>
 		<key>Resources/uploader.py</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			Bb86yN75XWUMtuCh+osKG0T69Dm44aVD4KL2BDBSG+A=
+			p2g7gEBS3f8xuK63YDADvVHXfubvt+KrGAmFrP4ChBw=
 			</data>
 		</dict>
 	</dict>

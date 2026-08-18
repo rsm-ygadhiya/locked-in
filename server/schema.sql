@@ -714,7 +714,7 @@ create policy live_delete on storage.objects
 -- Storage API first (see the note above); this only removes the rows, and calling
 -- it by itself would strand every image it was supposed to account for:
 --
---     uv run --script cloud/purge.py --days 30
+--     uv run --script server/purge.py --days 30
 --
 -- That lists the files with session_files(), deletes them through the API, then
 -- calls this to drop the rows. Frames and events cascade with the sessions.

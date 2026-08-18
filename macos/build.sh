@@ -52,8 +52,13 @@ cp "$HERE/guided-access.command"   "$APP/Contents/Resources/guided-access.comman
 # through lockedin_cloud.py.
 for helper in recorder.py lockedin_config.py admin_panel.py \
               lockedin_cloud.py student_session.py uploader.py; do
-	cp "$ROOT/$helper" "$APP/Contents/Resources/$helper"
+	cp "$ROOT/src/$helper" "$APP/Contents/Resources/$helper"
 done
+# The dashboard and its little server ship too, so the Faculty button can publish the
+# page on the local wi-fi from a bundle that was copied to a machine on its own.
+mkdir -p "$APP/Contents/Resources/dashboard"
+cp "$ROOT/server/serve.py"             "$APP/Contents/Resources/serve.py"
+cp "$ROOT/server/dashboard/index.html" "$APP/Contents/Resources/dashboard/index.html"
 chmod +x "$APP/Contents/MacOS/LockedIn" "$APP/Contents/Resources/guided-access.command"
 
 # ---------- ad-hoc sign ----------

@@ -10,7 +10,7 @@ settings — the site the lockdown pins to, the hosts that stay reachable, the u
 passcode, which streams are recorded, and the Supabase project behind proctored
 exams. They are the same settings, in the same file, on either platform.
 
-    uv run --script admin_panel.py
+    uv run --script src/admin_panel.py
 
 Getting in: sign in with your proctor account, the same Supabase account that
 approves students in the dashboard. There is no separate admin password any more.
@@ -25,6 +25,7 @@ honesty note at the top of lockedin_config.py about what that does and doesn't b
 
 from __future__ import annotations
 
+import subprocess
 import sys
 import tkinter as tk
 from pathlib import Path
@@ -291,12 +292,29 @@ class AdminPanel(tk.Tk):
             ttk.Label(tab, text=hint, foreground="#777") \
                 .grid(row=index, column=2, sticky="w", padx=(0, 12))
 
-        ttk.Separator(tab, orient="horizontal") \
-            .grid(row=6, column=0, columnspan=3, sticky="ew", pady=10)
+        # Serving the dashboard rather than opening the file is what lets a proctor
+        # watch from a second device — a phone, an iPad, the laptop at the front of
+        # the room. It is the same page either way; the only difference is whether
+        # anything but this machine can reach it.
+        ttk.Label(tab, text="Show it on my wi-fi").grid(row=6, column=0, sticky="e",
+                                                       **PAD)
+        hosting = ttk.Frame(tab)
+        hosting.grid(row=6, column=1, sticky="w", **PAD)
+        ttk.Button(hosting, text="Serve on this network", command=self._serve_dashboard) \
+            .grid(row=0, column=0)
+        ttk.Button(hosting, text="Stop", command=self._stop_dashboard) \
+            .grid(row=0, column=1, padx=6)
+        self.serve_status = ttk.Label(tab, text="", foreground="#555",
+                                      wraplength=520, justify="left")
+        self.serve_status.grid(row=7, column=1, columnspan=2, sticky="w", padx=12)
+        self._refresh_serve_status()
 
-        ttk.Label(tab, text="Live monitoring").grid(row=7, column=0, sticky="e", **PAD)
+        ttk.Separator(tab, orient="horizontal") \
+            .grid(row=8, column=0, columnspan=3, sticky="ew", pady=10)
+
+        ttk.Label(tab, text="Live monitoring").grid(row=9, column=0, sticky="e", **PAD)
         live = ttk.Frame(tab)
-        live.grid(row=7, column=1, sticky="w", **PAD)
+        live.grid(row=9, column=1, sticky="w", **PAD)
         self.live_interval = ttk.Spinbox(live, from_=1.0, to=30.0, increment=0.5,
                                         width=6)
         self.live_interval.set(float(cloud.get("live_interval") or 3.0))
@@ -309,15 +327,76 @@ class AdminPanel(tk.Tk):
 
         ttk.Label(tab, text="The anon key is meant to be public — it ships inside this\n"
                             "app. Access is enforced by the database policies in\n"
-                            "cloud/schema.sql. Never paste the service_role key here.",
-                  foreground="#555").grid(row=8, column=0, columnspan=3, sticky="w",
+                            "server/schema.sql. Never paste the service_role key here.",
+                  foreground="#555").grid(row=10, column=0, columnspan=3, sticky="w",
                                           **PAD)
 
         self.cloud_status = ttk.Label(tab, text="", foreground="#555")
-        self.cloud_status.grid(row=9, column=1, sticky="w", padx=12)
+        self.cloud_status.grid(row=11, column=1, sticky="w", padx=12)
         ttk.Button(tab, text="Test the connection", command=self._test_cloud) \
-            .grid(row=9, column=0, sticky="e", **PAD)
+            .grid(row=11, column=0, sticky="e", **PAD)
         return tab
+
+    # ---------- serving the dashboard on the local network ----------
+
+    def _serve_script(self) -> Path | None:
+        """server/serve.py — beside this panel in the .app bundle, in server/ in the repo."""
+        here = Path(__file__).resolve().parent
+        for candidate in (here / "serve.py", here.parent / "server" / "serve.py"):
+            if candidate.exists():
+                return candidate
+        return None
+
+    def _run_serve(self, *arguments: str) -> tuple[int, str]:
+        script = self._serve_script()
+        if not script:
+            return 1, "serve.py was not found next to this panel."
+        try:
+            done = subprocess.run([sys.executable, str(script), *arguments],
+                                  capture_output=True, text=True, timeout=25)
+        except (OSError, subprocess.SubprocessError) as error:
+            return 1, str(error)
+        output = (done.stdout or done.stderr or "").strip()
+        return done.returncode, output
+
+    def _refresh_serve_status(self) -> None:
+        code, output = self._run_serve("--status")
+        if code == 0 and output.startswith("http"):
+            self._announce_serving(output)
+        else:
+            self.serve_status.config(
+                text="Not being served. The dashboard is only reachable on this "
+                     "machine until you start it.")
+
+    def _announce_serving(self, url: str) -> None:
+        base = url.rstrip("/")
+        self.serve_status.config(
+            text=f"Serving at {base}/ — open that on any device on this wi-fi.\n"
+                 f"To point another machine at this exam, run there:  "
+                 f"uv run --script src/lockedin_config.py enroll {base}")
+
+    def _serve_dashboard(self) -> None:
+        self.serve_status.config(text="starting...")
+        self.update_idletasks()
+        code, output = self._run_serve("--ensure")
+        if code != 0 or not output.startswith("http"):
+            self.serve_status.config(text=output[:200] or "could not start the server.")
+            return
+        # Fill the address in rather than saving behind their back: Save is what
+        # commits every other field on this panel, and this one is no different.
+        self.cloud_entries["dashboard_url"].delete(0, tk.END)
+        self.cloud_entries["dashboard_url"].insert(0, output.strip())
+        self._announce_serving(output.strip())
+        messagebox.showinfo(
+            "Serving the dashboard",
+            f"The proctor dashboard is now at\n\n{output.strip()}\n\nOpen that on "
+            "your phone, tablet or other laptop — anything on this wi-fi.\n\nIt keeps "
+            "running after this panel closes. Press Save to make the Faculty button "
+            "open this address too.")
+
+    def _stop_dashboard(self) -> None:
+        code, output = self._run_serve("--stop")
+        self.serve_status.config(text=output[:200] or "stopped.")
 
     def _test_cloud(self) -> None:
         """Save nothing; just say whether what is typed in actually works."""

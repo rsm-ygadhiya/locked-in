@@ -123,9 +123,52 @@
     var folder = htaFolder();
     var here = folder + '\\' + name;
     if (fso.FileExists(here)) { return here; }
-    var up = fso.GetParentFolderName(folder) + '\\' + name;
-    if (fso.FileExists(up)) { return up; }
+    var parent = fso.GetParentFolderName(folder);
+    // A flattened copy on a USB stick keeps everything in one folder; a clone of the
+    // repo puts the helpers in src\ and the proctor side in server\.
+    var places = [parent + '\\' + name,
+                  parent + '\\src\\' + name,
+                  parent + '\\server\\' + name];
+    for (var i = 0; i < places.length; i++) {
+      if (fso.FileExists(places[i])) { return places[i]; }
+    }
     return null;
+  }
+
+  // Run a helper and read its first line of output. WScript.Shell.Run cannot pipe,
+  // and Exec flashes a console window, so this is the same temp-file trick the
+  // dashboard lookup uses.
+  function pyOutput(script, args) {
+    var fso = new ActiveXObject('Scripting.FileSystemObject');
+    var shell = new ActiveXObject('WScript.Shell');
+    var tmp = fso.GetSpecialFolder(2) + '\\lockedin_out.txt';
+    shell.Run('cmd /c ' + pyCommand(script, args) + ' > "' + tmp + '"', 0, true);
+    var text = '';
+    if (fso.FileExists(tmp)) {
+      var stream = fso.OpenTextFile(tmp, 1);
+      text = stream.AtEndOfStream ? '' : stream.ReadAll();
+      stream.Close();
+      fso.DeleteFile(tmp);
+    }
+    return text.split(/[\r\n]+/)[0];
+  }
+
+  // Addresses that only exist while our own dashboard server is running: worth
+  // starting on demand, and worth re-asking for, since this machine's wi-fi address
+  // changes with the DHCP lease.
+  function isLocallyServed(address) {
+    var match = address.match(/^https?:\/\/([^\/:]+)/i);
+    if (!match) { return false; }
+    var host = match[1].toLowerCase();
+    if (host === 'localhost' || host.indexOf('.local') === host.length - 6) { return true; }
+    if (host.indexOf('127.') === 0 || host.indexOf('10.') === 0
+        || host.indexOf('192.168.') === 0) { return true; }
+    var parts = host.split('.');
+    if (parts.length === 4 && parts[0] === '172') {
+      var second = parseInt(parts[1], 10);
+      if (second >= 16 && second <= 31) { return true; }
+    }
+    return false;
   }
 
   function openAdmin() {
@@ -188,10 +231,23 @@
         var match = text.match(/"dashboard_url"\s*:\s*"([^"]*)"/);
         if (match) { url = match[1].replace(/\\\\/g, '\\'); }
       }
+      // Nothing saved, or an address on this machine's own network: that page is
+      // served by server\serve.py, which nobody has started yet. Start it, and use
+      // the address it reports rather than the saved one.
+      if (!url || isLocallyServed(url)) {
+        var serve = findHelper('serve.py');
+        if (serve) {
+          var served = pyOutput(serve, '--ensure');
+          if (served && served.indexOf('http') === 0) { url = served; }
+        }
+      }
       if (!url) {
-        alert('No dashboard address is set yet.\n\nChoose Faculty > Exam settings and '
-            + 'paste it into the Proctoring tab, or open cloud\\dashboard\\index.html '
-            + 'in your browser.');
+        alert('No dashboard address is set yet.\n\nChoose Faculty > Exam settings > '
+            + 'Proctoring and press "Serve on this network" — that publishes the '
+            + 'dashboard on your wi-fi, so you can watch from a phone or a second '
+            + 'laptop as well as from here.\n\nIf that does nothing, uv is probably '
+            + 'not installed; you can still open server\\dashboard\\index.html in '
+            + 'your browser.');
         return;
       }
       shell.Run('"' + url + '"', 1, false);

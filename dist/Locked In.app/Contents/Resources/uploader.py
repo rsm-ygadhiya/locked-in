@@ -24,7 +24,7 @@ final status flip to 'ended' when the session stops.
 
 Run it (the lockdown does this for you):
 
-    python3 uploader.py --session-dir <dir> --session-id <uuid> --token-file <path>
+    python3 src/uploader.py --session-dir <dir> --session-id <uuid> --token-file <path>
 
 The access token arrives in a file, not on the command line: every process on the
 machine can read another process's arguments, and that token is the student's

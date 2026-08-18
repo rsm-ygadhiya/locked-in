@@ -19,7 +19,7 @@ one more thing that can fail five minutes before an exam.
 
 The anon key is the only key that ever appears here. It is designed to be public
 — it ships inside an app students can open — and every real access rule lives in
-the Row Level Security policies in cloud/schema.sql. If you ever find yourself
+the Row Level Security policies in server/schema.sql. If you ever find yourself
 reaching for the service_role key to make something work, the policy is wrong.
 
 Logging in with an ID rather than an email:
@@ -27,13 +27,13 @@ Logging in with an ID rather than an email:
     entry with no "@" is expanded with the configured domain — A12345678 becomes
     A12345678@ucsd.edu — which is a stable, unique, well-formed address. Email
     confirmation must be off in the Supabase project for that to work; see
-    cloud/SETUP.md.
+    docs/SETUP.md.
 
 Use it as a library (see student_session.py), or check a project from the CLI:
 
-    python3 lockedin_cloud.py check
-    python3 lockedin_cloud.py login          # prompts, then prints your role
-    python3 lockedin_cloud.py verify-exit <exam-id> <token-file>   # code on stdin
+    python3 src/lockedin_cloud.py check
+    python3 src/lockedin_cloud.py login          # prompts, then prints your role
+    python3 src/lockedin_cloud.py verify-exit <exam-id> <token-file>   # code on stdin
 """
 
 from __future__ import annotations

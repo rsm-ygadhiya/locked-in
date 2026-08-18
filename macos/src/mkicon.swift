@@ -81,7 +81,10 @@ ctx.fillPath()
 
 img.unlockFocus()
 
-let out = "/private/tmp/claude-501/-Users-lucifer-Desktop-Thrive/b2b4eba2-9ff0-4977-9dec-9a5ea0df9ec5/scratchpad/icon_1024.png"
+// Relative on purpose: build.sh runs this from macos/.build and picks the file up
+// from there. An absolute path here builds fine and then writes to somebody else's
+// machine's idea of a temp directory.
+let out = "icon_1024.png"
 let tiff = img.tiffRepresentation!
 let rep = NSBitmapImageRep(data: tiff)!
 let png = rep.representation(using: .png, properties: [:])!

@@ -19,7 +19,7 @@
 
   The allowed URL, allowed hosts, unlock passcode and recording options all come from
   the settings file, written from the launcher under Faculty > Exam settings (or:
-  uv run --script admin_panel.py). They are the same settings, in the same file
+  uv run --script src/admin_panel.py). They are the same settings, in the same file
   format, as on a Mac. The passcode is stored only as a PBKDF2 hash, so it is not
   sitting in plain text in this script any more.
 
@@ -58,10 +58,15 @@ Add-Type -AssemblyName System.Drawing
 $ScriptDir = Split-Path -Parent $PSCommandPath
 
 # ---------- Locate the Python helpers and a runner ----------
-# In the repo the .py files sit at the top level, one directory up from windows/;
+# In a clone of the repo the .py files sit in src/, one directory up from windows/;
 # alongside the script is also supported, for a flattened copy on a USB stick.
 function Find-Helper([string]$name) {
-    foreach ($candidate in @((Join-Path $ScriptDir $name), (Join-Path (Split-Path -Parent $ScriptDir) $name))) {
+    # Beside this script when the folder was flattened onto a USB stick; in src\ one
+    # level up in a clone of the repo; directly one level up in an older layout.
+    $parent = Split-Path -Parent $ScriptDir
+    foreach ($candidate in @((Join-Path $ScriptDir $name),
+                             (Join-Path (Join-Path $parent "src") $name),
+                             (Join-Path $parent $name))) {
         if (Test-Path $candidate) { return $candidate }
     }
     return $null

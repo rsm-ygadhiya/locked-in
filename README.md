@@ -8,18 +8,44 @@ It runs in either of two modes:
 
 - **Standalone** (the default, and what it has always been): no accounts, no server,
   nothing leaves the machine. Open it, pick Student, and the lockdown starts.
-- **Proctored** ([set it up](cloud/SETUP.md)): students sign in, photograph their
+- **Proctored** ([set it up](docs/SETUP.md)): students sign in, photograph their
   student ID, and wait for a proctor to admit them; the proctor watches a live grid
   of every screen and webcam from a web dashboard. Filling in a Supabase project in
   the exam settings is what switches this on.
 
 > **This is a focus and monitoring tool, not a secure exam browser.** Force Quit, Task
 > Manager, a reboot, or a second device all defeat the lockdown. For a graded exam,
-> read [Before you deploy this](#before-you-deploy-this) — and use an official
-> proctoring tool (Respondus / Proctorio / Honorlock) if you need real integrity
-> guarantees.
+> read [Before you deploy this](#before-you-deploy-this) and [known
+> problems](docs/TROUBLESHOOTING.md#known-problems) — and use an official proctoring
+> tool (Respondus / Proctorio / Honorlock) if you need real integrity guarantees.
 
 ![platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-black)
+
+---
+
+## Try it
+
+This repo is published as a working demo, pointed at a throwaway Supabase project that
+holds nobody's data. Everything you need to run a whole exam is here, credentials
+included:
+
+| | |
+| --- | --- |
+| Proctor dashboard | `admin` / `admin123` |
+| Student | `student` / `student123` |
+| Unlock passcode (ends a locked session) | `admin`, on a fresh install |
+
+```bash
+uv run --script server/serve.py     # then open the address it prints, on any device
+```
+
+**[docs/DEMO.md](docs/DEMO.md)** walks through it: look at the proctor's side without
+changing anything, then sit a real exam on the same machine and watch yourself appear on
+the grid. Ten minutes.
+
+Those credentials are public, which is the whole reason **this project must never run a
+real exam**. Stand up your own ([docs/SETUP.md](docs/SETUP.md)) for anything that
+involves an actual student.
 
 ---
 
@@ -56,23 +82,30 @@ And in proctored mode:
 
 ```
 locked-in/
-├── recorder.py               screen + webcam + mic recorder (both platforms)
-├── lockedin_config.py        settings store, password hashing, and the CLI the
-│                             lockdown scripts read their settings through
-├── admin_panel.py            the admin panel (Tk, both platforms)
-├── lockedin_cloud.py         Supabase client — auth, tables, storage, stdlib only
-├── student_session.py        the proctored check-in: sign in, ID photo, wait
-├── uploader.py               publishes live tiles + heartbeat during an exam
-├── cloud/
-│   ├── SETUP.md              how to stand the backend up on a free Supabase project
+├── src/                      the shared Python helpers — both platforms, both modes
+│   ├── recorder.py           screen + webcam + mic recorder
+│   ├── lockedin_config.py    settings store, password hashing, and the CLI the
+│   │                         lockdown scripts read their settings through
+│   ├── admin_panel.py        the exam settings panel (Tk)
+│   ├── lockedin_cloud.py     Supabase client — auth, tables, storage, stdlib only
+│   ├── student_session.py    the proctored check-in: sign in, ID photo, wait
+│   └── uploader.py           publishes live tiles + heartbeat during an exam
+├── server/                   everything the proctored mode needs
 │   ├── schema.sql            tables, RLS policies, storage buckets, purge function
+│   ├── serve.py              publishes the dashboard on your wi-fi, so a proctor
+│   │                         can watch from a phone or a second laptop
 │   ├── purge.py              retention: delete old sessions and their photos
 │   ├── dashboard/
 │   │   └── index.html        the faculty dashboard — one self-contained page
-│   └── test/
+│   └── tests/
+│       ├── README.md         what the nine attacks prove, and how to read the output
 │       ├── run_tests.sh      applies schema.sql to a local Postgres, then attacks it
 │       ├── supabase_stub.sql the bits of auth/storage the schema builds on
 │       └── rls_test.sql      nine attempts to break the access rules
+├── docs/
+│   ├── DEMO.md               ten-minute tour for whoever has to approve this
+│   ├── SETUP.md              how to stand the backend up on a free Supabase project
+│   └── TROUBLESHOOTING.md    known problems, and symptom-by-symptom fixes
 ├── macos/
 │   ├── build.sh              build dist/Locked In.app from source
 │   ├── guided-access.command the actual macOS lockdown (bash + AppleScript)
@@ -96,14 +129,18 @@ two halves of a proctor's job — the web dashboard, and the exam settings — s
 no longer a gear icon a student can wander into. Both launchers show the same two
 choices, and the exam settings are the same settings on either platform: they live in
 one JSON file that both lockdown scripts read.
-There is a smaller "on Windows?" link for the other platform's instructions, so you can copy this whole
-folder to both machines (USB / iCloud / OneDrive) and use whichever applies. The `.py`
-files at the top level are shared by both platforms — keep them next to the platform
-folder, or in it, and each launcher will find them.
+There is a smaller "on Windows?" link for the other platform's instructions, so you can
+copy this whole folder to both machines (USB / iCloud / OneDrive) and use whichever
+applies. The helpers in `src/` are shared by both platforms; each launcher and each
+lockdown script looks beside itself first, then in `src/` one level up, so a flattened
+copy on a USB stick works as well as a clone of the repo does.
 
 Faculty is a web page rather than a desktop screen: the Faculty button opens
-`cloud/dashboard/index.html` at whatever address you published it to, so a proctor can
-work from their own laptop instead of a student's machine.
+`server/dashboard/index.html` at whatever address you published it to, so a proctor can
+work from their own laptop instead of a student's machine. If no address is set, or the
+saved one is on your own network, the button starts `server/serve.py` and opens the
+address that reports — see [proctoring from another
+device](#proctoring-from-another-device).
 
 ---
 
@@ -174,7 +211,7 @@ To exit: close Chrome, then enter the passcode.
 Choose **Faculty → Exam settings** on either launcher, or run it directly:
 
 ```bash
-uv run --script admin_panel.py
+uv run --script src/admin_panel.py
 ```
 
 Sign in with your **proctor account** — the same Supabase account that approves
@@ -241,7 +278,7 @@ nothing but Python.
 Run the recorder on its own to check a machine before an exam:
 
 ```bash
-uv run --script recorder.py --out-dir ~/Desktop/test-session
+uv run --script src/recorder.py --out-dir ~/Desktop/test-session
 # stop it with Ctrl+C, or: touch ~/Desktop/test-session/STOP
 ```
 
@@ -256,7 +293,7 @@ student real CPU during their exam.
 
 ## Proctored exams
 
-Full walkthrough: **[cloud/SETUP.md](cloud/SETUP.md)**. The short version of how it
+Full walkthrough: **[docs/SETUP.md](docs/SETUP.md)**. The short version of how it
 hangs together:
 
 ```
@@ -293,19 +330,97 @@ class inside the free tier — see the cost breakdown in SETUP.md.
 Check a project from the command line without launching anything:
 
 ```bash
-uv run --script lockedin_cloud.py check     # is the URL + key good?
-uv run --script lockedin_cloud.py login     # sign in, print the account's role
+uv run --script src/lockedin_cloud.py check     # is the URL + key good?
+uv run --script src/lockedin_cloud.py login     # sign in, print the account's role
 ```
+
+### Proctoring from another device
+
+`dashboard/index.html` opened as a file works, but only on the machine holding the
+file — no use when you want the live grid on the iPad next to you, or on the laptop at
+the front of the room. Serve it on your own network instead:
+
+```bash
+uv run --script server/serve.py
+
+Dashboard, on this machine : http://127.0.0.1:8765/
+Dashboard, on your wi-fi   : http://192.168.1.23:8765/
+                             http://desk-mac.local:8765/
+Enrol a student machine    : uv run --script src/lockedin_config.py enroll http://192.168.1.23:8765
+```
+
+Open either wi-fi address on any device on the same network. Or press **Serve on this
+network** under Faculty → Exam settings → Proctoring, which starts the same server, and
+fills the dashboard address in for you — after that the Faculty button opens it, and
+starts the server first if nobody has.
+
+The server hands out three things: the dashboard at `/`, the proctoring settings at
+`/setup.json`, and `/enroll`, a page of joining instructions you can read off a phone.
+The page it serves has this machine's project and key patched into it from the settings
+file, so the dashboard and the app can never end up watching different projects.
+
+It does not change how an exam runs. Students still talk to Supabase directly, so their
+machines work on wi-fi or cellular, on campus or at home; this only decides who can
+reach the page. Anyone on the network can load it without signing in, which is the same
+exposure as publishing it to GitHub Pages — the anon key it carries is public by design,
+and every access rule lives in the database policies, so a visitor still has to sign in
+as a proctor to see a single student. `--local-only` binds it to this machine, and
+`--stop` ends it.
+
+### Adding more machines to an exam
+
+Any number of machines can sit the same exam — each one needs the project details, and
+retyping a 200-character key on every laptop in a lab is how people end up with one
+machine quietly pointed at the wrong place. With the server running on the machine that
+already has them, run this on each of the others:
+
+```bash
+uv run --script src/lockedin_config.py enroll http://192.168.1.23:8765
+```
+
+That copies the project URL, anon key, ID domain and live-monitoring settings across,
+and points that machine's Faculty button at your dashboard. Only that block is copied —
+the passcode, the allowed site and the recording choices stay whatever that machine has,
+because in a proctored exam the site comes from the exam itself.
+
+They only need to share a network for the enrolment. After that each machine talks to
+Supabase on its own, so students can be anywhere.
 
 **Verifying the access rules.** The claim the whole design rests on is that a student
 with full control of their laptop, holding the anon key that ships inside the app,
-still cannot admit themselves or see anyone else's data. `cloud/test/run_tests.sh`
+still cannot admit themselves or see anyone else's data. `server/tests/run_tests.sh`
 applies `schema.sql` to a throwaway local Postgres and then tries nine ways to break
 it — self-approval, inserting a pre-approved session, self-promotion to faculty,
 forging the proctor's decision fields, reading another student's session, uploading
 into someone else's storage folder, walking a session backwards, and heartbeating
 after a refusal. All nine are blocked; run it yourself before trusting it with a
 class.
+
+---
+
+## Known problems
+
+The full list, with fixes, is in
+**[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)**. The ones that change whether
+you should use this at all:
+
+- **The lockdown is defeated by Force Quit, Task Manager, a reboot, or a phone.** It
+  stops casual tab-switching, and nothing stronger.
+- **Recordings are unencrypted on the student's Desktop**, and nothing collects or
+  deletes them. Who gathers them and when they are destroyed is work this tool does
+  not do for you.
+- **A recording failure does not stop the exam.** It is reported and logged, by design
+  — so a session can run with no video and only a line in `recorder.log` to say so.
+- **macOS permissions are granted to Terminal**, not to the app, because Terminal is
+  what runs the lockdown. Anything else run from Terminal inherits them.
+- **The Windows launcher is an HTA**, run by `mshta.exe`, which many managed
+  environments block outright. Ask your endpoint people before planning around it.
+- **Only the primary display is recorded**, and the second monitor is not disabled.
+- **Proctored mode needs the internet**, and the free tier's limits are real: roughly
+  200 MB of egress for a 40-student, 2-hour exam, dominated by how many people have
+  the live grid open.
+- **Not security-reviewed.** The access rules have a test suite
+  ([server/tests/](server/tests/README.md)); the rest of it has had no outside review.
 
 ---
 
@@ -335,7 +450,7 @@ you:
   material than the videos do: a photograph of each student's ID card, a photograph
   of their face, and rolling thumbnails of their screen. That data lives in your
   Supabase project, and deciding where it may live, who can read it, and when it is
-  purged is now your obligation rather than a hypothetical. `cloud/purge.py` does the
+  purged is now your obligation rather than a hypothetical. `server/purge.py` does the
   deleting; nothing runs it for you. Note also that deletion has a mandatory order —
   files through the Storage API *first*, rows second — because a file whose session
   row is gone can no longer be deleted by anyone. See SETUP.md.
@@ -385,7 +500,8 @@ Chrome policy is removed, so Chrome always goes back to normal. A hard kill (For
 power loss) loses the last few seconds of video rather than the whole file.
 
 If you've lost the passcode as well, delete the settings file and the next run
-recreates it with the defaults.
+recreates it with the defaults — including the shipped passcode, `admin`, which the
+settings panel then nags you to change.
 
 ---
 

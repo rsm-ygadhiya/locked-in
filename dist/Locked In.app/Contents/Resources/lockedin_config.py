@@ -29,14 +29,18 @@ security boundary against the machine's own owner.
 
 CLI (used by the lockdown scripts; all output is plain text on stdout):
 
-    python3 lockedin_config.py init             create the file with defaults if absent
-    python3 lockedin_config.py path             print the config file location
-    python3 lockedin_config.py get-url          print the allowed URL
-    python3 lockedin_config.py get-hosts        print allowed hosts, one per line
-    python3 lockedin_config.py get-recording    print "screen camera audio" as 3 bools
-    python3 lockedin_config.py get-cloud        print the cloud block as JSON
-    python3 lockedin_config.py cloud-enabled    exit 0 if a Supabase project is set
-    python3 lockedin_config.py verify-passcode  read passcode on STDIN; exit 0 if correct
+    python3 src/lockedin_config.py init             create the file with defaults if absent
+    python3 src/lockedin_config.py path             print the config file location
+    python3 src/lockedin_config.py get-url          print the allowed URL
+    python3 src/lockedin_config.py get-hosts        print allowed hosts, one per line
+    python3 src/lockedin_config.py get-recording    print "screen camera audio" as 3 bools
+    python3 src/lockedin_config.py get-cloud        print the cloud block as JSON
+    python3 src/lockedin_config.py cloud-enabled    exit 0 if a Supabase project is set
+    python3 src/lockedin_config.py verify-passcode  read passcode on STDIN; exit 0 if correct
+    python3 src/lockedin_config.py enroll <address>  copy the proctoring settings from
+                                                 another machine's dashboard server
+                                                 (server/serve.py), e.g. enroll
+                                                 http://192.168.1.23:8765
 
 Secrets are read from stdin, never taken as arguments — an argument would be visible
 to every other process on the machine via the process list.
@@ -48,6 +52,7 @@ import json
 import os
 import platform
 import secrets
+import socket
 import sys
 from hashlib import pbkdf2_hmac
 from pathlib import Path
@@ -55,7 +60,10 @@ from pathlib import Path
 ITERATIONS = 200_000
 DEFAULT_URL = "https://rsm-django-02.ucsd.edu/video-exam/station/"
 DEFAULT_HOSTS = ["rsm-django-02.ucsd.edu", "ucsd.edu", "duosecurity.com"]
-DEFAULT_PASSCODE = "letmeout"
+# The shipped default, so a reviewer can end a locked session without hunting for it.
+# It is meant to be replaced before the thing is used for anything real — the panel
+# warns while it is still this, and the README says so twice.
+DEFAULT_PASSCODE = "admin"
 
 # The proctoring backend. Empty url/anon_key means this machine runs in the
 # original standalone mode: no accounts, no approval gate, nothing leaves the
@@ -63,7 +71,7 @@ DEFAULT_PASSCODE = "letmeout"
 #
 # The anon key belongs here despite being a "key": Supabase publishes it to
 # browsers and desktop apps by design, and every access rule is enforced by the
-# Row Level Security policies in cloud/schema.sql. The service_role key must
+# Row Level Security policies in server/schema.sql. The service_role key must
 # never be pasted here — it bypasses all of them.
 DEFAULT_CLOUD = {
     "url": "",
@@ -96,6 +104,39 @@ def config_path() -> Path:
     else:
         base = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
     return base / "LockedIn" / "config.json"
+
+
+# ---------- the network this machine is on ----------
+
+def lan_ip() -> str:
+    """
+    This machine's address on the local network, as another device would reach it.
+
+    There is no direct "what is my wi-fi address" call, so the trick is to ask the
+    routing table: open a UDP socket towards somewhere off-network and read back the
+    source address the kernel picked. UDP has no handshake, so nothing is sent and
+    the destination never has to exist — 192.0.2.1 is in the block reserved for
+    documentation exactly so it never will.
+    """
+    probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        probe.connect(("192.0.2.1", 9))
+        address = probe.getsockname()[0]
+        if address and not address.startswith("127."):
+            return address
+    except OSError:
+        pass          # no default route — a machine on wi-fi with no gateway
+    finally:
+        probe.close()
+    # Fall back to whatever the hostname resolves to, which on a home network is
+    # usually the same answer by a slower road.
+    try:
+        for entry in socket.gethostbyname_ex(socket.gethostname())[2]:
+            if not entry.startswith("127."):
+                return entry
+    except OSError:
+        pass
+    return "127.0.0.1"
 
 
 # ---------- hashing ----------
@@ -237,6 +278,57 @@ def main(argv: list[str]) -> int:
         # Exit status, so a shell script can branch on it without parsing output.
         cloud = config["cloud"]
         return 0 if cloud.get("url") and cloud.get("anon_key") else 1
+
+    if command == "enroll":
+        # Point a second student machine at the same exam without retyping a
+        # 200-character key. The address is another machine already running
+        # server/serve.py; /setup.json is the proctoring block it is willing to share.
+        if len(argv) < 2:
+            print("usage: enroll <address>   e.g. enroll http://192.168.1.23:8765",
+                  file=sys.stderr)
+            return 64
+        address = argv[1].strip().rstrip("/")
+        if not address.startswith(("http://", "https://")):
+            address = "http://" + address
+        from urllib.error import HTTPError, URLError
+        from urllib.request import urlopen
+        try:
+            with urlopen(address + "/setup.json", timeout=8) as response:
+                incoming = json.loads(response.read().decode("utf-8"))
+        except HTTPError as error:
+            # 409 is the server saying it has nothing configured to hand over, and
+            # it explains itself in the body.
+            detail = error.read().decode("utf-8", "replace")
+            try:
+                detail = json.loads(detail).get("error", detail)
+            except ValueError:
+                pass
+            print(f"that machine cannot share its settings: {detail}", file=sys.stderr)
+            return 1
+        except (URLError, OSError, ValueError) as error:
+            print(f"could not reach {address}: {error}", file=sys.stderr)
+            print("Is the other machine running server/serve.py, and are you both on "
+                  "the same wi-fi?", file=sys.stderr)
+            return 1
+
+        if not incoming.get("url") or not incoming.get("anon_key"):
+            print("that machine sent no project URL or key.", file=sys.stderr)
+            return 1
+        cloud = dict(config["cloud"])
+        for key in ("url", "anon_key", "id_email_domain", "live_interval",
+                    "live_width"):
+            if incoming.get(key) not in (None, ""):
+                cloud[key] = incoming[key]
+        # The dashboard is that machine, not this one: a student machine has no
+        # business hosting it, but a proctor who enrols their own laptop should
+        # find the Faculty button already pointing somewhere real.
+        cloud["dashboard_url"] = address + "/"
+        config["cloud"] = cloud
+        path = save(config)
+        print(f"enrolled with {cloud['url']}")
+        print(f"dashboard: {cloud['dashboard_url']}")
+        print(f"saved to {path}")
+        return 0
 
     if command == "verify-passcode":
         # Trailing newline from the shell's pipe is not part of the passcode.

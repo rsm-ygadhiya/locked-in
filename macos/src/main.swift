@@ -64,6 +64,46 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
         return String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// Run server/serve.py --ensure: start the local dashboard server if it is not
+    /// already up, and hand back the address to open. Returns nil if that failed —
+    /// no uv, no serve.py, no network — and the caller falls back to the alert.
+    func ensureDashboardServer() -> String? {
+        guard let res = Bundle.main.resourcePath,
+              let runner = AppDelegate.pythonRunner(),
+              FileManager.default.fileExists(atPath: res + "/serve.py") else { return nil }
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: runner.exe)
+        p.arguments = runner.args + [res + "/serve.py", "--ensure"]
+        let pipe = Pipe()
+        p.standardOutput = pipe
+        p.standardError = FileHandle.nullDevice
+        do { try p.run() } catch { return nil }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        p.waitUntilExit()
+        guard p.terminationStatus == 0,
+              let out = String(data: data, encoding: .utf8)?
+                  .trimmingCharacters(in: .whitespacesAndNewlines),
+              out.hasPrefix("http") else { return nil }
+        return out
+    }
+
+    /// Is this address one that only exists while our own server is running? Those
+    /// are the ones worth starting on demand — and worth re-asking for, because the
+    /// machine's wi-fi address changes with the DHCP lease and the saved one goes
+    /// stale without anything looking wrong.
+    static func isLocallyServed(_ address: String) -> Bool {
+        guard let host = URL(string: address)?.host?.lowercased() else { return false }
+        if host == "localhost" || host.hasSuffix(".local") { return true }
+        if host.hasPrefix("127.") || host.hasPrefix("10.") || host.hasPrefix("192.168.") {
+            return true
+        }
+        // 172.16.0.0/12 — the third private range, and the fiddly one to spell.
+        let parts = host.split(separator: ".")
+        if parts.count == 4, parts[0] == "172", let second = Int(parts[1]),
+           (16...31).contains(second) { return true }
+        return false
+    }
+
     /// The proctor side is a web page, so this just opens it in the default browser.
     func openDashboard() {
         // get-cloud prints JSON; pulling one field out of it with JSONSerialization
@@ -77,6 +117,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
         // Three shapes are all legitimate here, because SETUP.md offers all three:
         // a published https page, a file:// URL, or a plain path to the .html on disk
         // for a proctor who just opens the file.
+        // A saved address on this machine's own network means the page is served by
+        // server/serve.py, which is not running yet if nobody started it. Start it,
+        // and use the address it reports rather than the saved one.
+        if dashboard.isEmpty || AppDelegate.isLocallyServed(dashboard) {
+            if let served = ensureDashboardServer() { dashboard = served }
+        }
         if !dashboard.isEmpty {
             var target: URL? = nil
             if dashboard.hasPrefix("/") {
@@ -91,12 +137,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
                 return
             }
         }
-        alert("No dashboard address set",
-              "The proctor dashboard is a web page, and this Mac does not know where "
-              + "it is published yet.\n\nGo back, choose Faculty > Exam settings, and paste "
-              + "its "
-              + "address into the Proctoring section — or open cloud/dashboard/"
-              + "index.html directly in a browser.")
+        alert("Could not open the dashboard",
+              "The proctor dashboard is a web page, and this Mac has no address for "
+              + "it.\n\nGo back to Faculty > Exam settings > Proctoring and press "
+              + "\"Serve on this network\" — that publishes it on your wi-fi, so you "
+              + "can watch from a phone or a second laptop as well as from here.\n\n"
+              + "If that button does nothing, uv is probably not installed; you can "
+              + "still open server/dashboard/index.html directly in a browser.")
     }
 
     /// Where to find uv (preferred — it installs the script's own dependencies) or a

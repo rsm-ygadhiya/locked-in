@@ -30,7 +30,7 @@ admitted should not end up in a locked-down browser at all.
 
 Run it directly to check the flow without a lockdown:
 
-    uv run --script student_session.py --session-dir /tmp/test-session
+    uv run --script src/student_session.py --session-dir /tmp/test-session
 
 Why Tk: it is in the standard library, so the check-in cannot fail because a UI
 toolkit did not install on a student's laptop five minutes before an exam. The
@@ -261,7 +261,7 @@ class Webcam:
             self.error = (
                 f"The camera library is not installed ({exc}).\n\n"
                 "Start Locked In with uv, which installs it automatically:\n"
-                "    uv run --script student_session.py\n\n"
+                "    uv run --script src/student_session.py\n\n"
                 "Or install it yourself:  pip3 install opencv-python")
             return False
         except Exception as exc:                  # noqa: BLE001 - reported on screen

@@ -25,7 +25,7 @@
 # ---------- Settings ----------
 # The allowed URL, the allowed hosts, the unlock passcode and which streams get
 # recorded all live in the settings file now, not in this script. Edit them from the
-# launcher under Faculty > Exam settings (or: uv run --script admin_panel.py).
+# launcher under Faculty > Exam settings (or: uv run --script src/admin_panel.py).
 # The passcode is stored only as a PBKDF2 hash, so it is no longer sitting in plain
 # text in a file every student can open.
 RECORD_DIR="$HOME/Desktop/LockedIn-Recordings"
@@ -47,25 +47,30 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # ---------- Locate the Python helpers and something to run them with ----------
 # Inside the app bundle the .py files sit next to this script in Resources/; in a plain
-# clone of the repo they are at the top level, one directory up from macos/.
+# clone of the repo they are in src/, one directory up from macos/.
 RECORDER=""
 CONFIG_PY=""
 CHECKIN_PY=""
 UPLOADER_PY=""
 CLOUD_PY=""
-for candidate in "$SCRIPT_DIR/recorder.py" "$SCRIPT_DIR/../recorder.py"; do
+for candidate in "$SCRIPT_DIR/recorder.py" "$SCRIPT_DIR/../src/recorder.py" \
+                 "$SCRIPT_DIR/../recorder.py"; do
 	if [[ -f "$candidate" ]]; then RECORDER="$candidate"; break; fi
 done
-for candidate in "$SCRIPT_DIR/lockedin_config.py" "$SCRIPT_DIR/../lockedin_config.py"; do
+for candidate in "$SCRIPT_DIR/lockedin_config.py" "$SCRIPT_DIR/../src/lockedin_config.py" \
+                 "$SCRIPT_DIR/../lockedin_config.py"; do
 	if [[ -f "$candidate" ]]; then CONFIG_PY="$candidate"; break; fi
 done
-for candidate in "$SCRIPT_DIR/student_session.py" "$SCRIPT_DIR/../student_session.py"; do
+for candidate in "$SCRIPT_DIR/student_session.py" "$SCRIPT_DIR/../src/student_session.py" \
+                 "$SCRIPT_DIR/../student_session.py"; do
 	if [[ -f "$candidate" ]]; then CHECKIN_PY="$candidate"; break; fi
 done
-for candidate in "$SCRIPT_DIR/uploader.py" "$SCRIPT_DIR/../uploader.py"; do
+for candidate in "$SCRIPT_DIR/uploader.py" "$SCRIPT_DIR/../src/uploader.py" \
+                 "$SCRIPT_DIR/../uploader.py"; do
 	if [[ -f "$candidate" ]]; then UPLOADER_PY="$candidate"; break; fi
 done
-for candidate in "$SCRIPT_DIR/lockedin_cloud.py" "$SCRIPT_DIR/../lockedin_cloud.py"; do
+for candidate in "$SCRIPT_DIR/lockedin_cloud.py" "$SCRIPT_DIR/../src/lockedin_cloud.py" \
+                 "$SCRIPT_DIR/../lockedin_cloud.py"; do
 	if [[ -f "$candidate" ]]; then CLOUD_PY="$candidate"; break; fi
 done
 

@@ -8,9 +8,9 @@ purge.py — delete old exam sessions, and the identity photos that came with th
 Retention is the part of a proctoring system that people skip, so this is a single
 command a proctor can run — or put on a cron — once grades are in:
 
-    uv run --script cloud/purge.py --days 30            # ask first, then delete
-    uv run --script cloud/purge.py --days 30 --yes      # no prompt, for cron
-    uv run --script cloud/purge.py --days 30 --dry-run  # just show what would go
+    uv run --script server/purge.py --days 30            # ask first, then delete
+    uv run --script server/purge.py --days 30 --yes      # no prompt, for cron
+    uv run --script server/purge.py --days 30 --dry-run  # just show what would go
 
 Order matters, and it is the reason this is a script rather than one line of SQL.
 Supabase guards storage.objects against direct deletion, because removing a row
@@ -30,7 +30,7 @@ import getpass
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 import lockedin_cloud as lc
 

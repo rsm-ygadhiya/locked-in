@@ -39,7 +39,7 @@ Run it:
     uv run recorder.py --out-dir ~/Desktop/LockedIn-Recordings/20260817-120000
 uv reads the dependency block above and installs into a cached environment on first
 run. With a plain interpreter, install the packages listed above yourself and run:
-    python3 recorder.py --out-dir <dir>
+    python3 src/recorder.py --out-dir <dir>
 
 Stopping it, in order of preference:
     1. create the file <out-dir>/STOP   (works everywhere, including Windows)
