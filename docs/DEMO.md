@@ -141,8 +141,7 @@ uv run --script server/purge.py --days 0             # actually delete
 ```
 
 **Where the honest limits are written down.** [Before you deploy
-this](../README.md#before-you-deploy-this) in the README, and
-[Known problems](TROUBLESHOOTING.md#known-problems). Read those before deciding
+this](BEFORE-YOU-DEPLOY.md), and [Known problems](TROUBLESHOOTING.md#known-problems). Read those before deciding
 anything; they are the part of this repo most worth your time.
 
 ---
