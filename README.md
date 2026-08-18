@@ -450,6 +450,17 @@ there is no server to configure and no environment variable to set. Signing in n
 faculty account: a student account is told, in as many words, that there is nothing for
 it to proctor.
 
+Two things about a Vercel project that will waste an afternoon each:
+
+- **Turn Vercel Authentication off** (Settings → Deployment Protection). It is on by
+  default for new projects, and it means everyone who is not on your Vercel team — every
+  proctor, your IT department — gets bounced to a Vercel login page before they ever see
+  the dashboard. The page has its own sign-in, and it is the one that matters.
+- **The dashboard must not be cached.** It is a single HTML file whose whole content is
+  the app, so a CDN holding yesterday's copy is a proctor looking at yesterday's
+  dashboard. `server/dashboard/vercel.json` sets `no-store` for exactly that reason, and
+  it is why that file exists next to the page rather than at the repository root.
+
 GitHub Pages needs no command at all — turn it on for the repository root, and the
 `index.html` at the top of this repo redirects to `server/dashboard/`.
 
