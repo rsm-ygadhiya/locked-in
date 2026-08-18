@@ -428,6 +428,28 @@ npx vercel deploy --temporary                   # no account: a public HTTPS URL
 npx vercel login && npx vercel deploy --prod    # or an address that stays
 ```
 
+Better than either, once you know you want to keep it: connect the repository to the
+Vercel project (**Settings → Git**), and every push to `main` redeploys the page. A
+one-shot `vercel deploy` is a copy of the dashboard as it was that afternoon, and the
+first thing you notice is a proctor signing in to a page that predates the feature they
+were told to look for.
+
+Two ways to point it at the dashboard, and it only matters which you pick because the
+page is three directories down:
+
+- **Root Directory `server/dashboard`** — publishes the page and nothing else. The
+  cleanest option, and what a one-shot `cd server/dashboard && vercel deploy` already
+  did.
+- **Root Directory left at the repository root** — `vercel.json` rewrites `/` to
+  `server/dashboard/index.html`, so the address is still just the domain. This also
+  publishes the source and the prebuilt app, which is fine for a public repo and not
+  for a private one.
+
+Either way the page is static and talks to Supabase from the proctor's own browser, so
+there is no server to configure and no environment variable to set. Signing in needs a
+faculty account: a student account is told, in as many words, that there is nothing for
+it to proctor.
+
 GitHub Pages needs no command at all — turn it on for the repository root, and the
 `index.html` at the top of this repo redirects to `server/dashboard/`.
 
