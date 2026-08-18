@@ -35,3 +35,6 @@ __pycache__/
 # the settings file, if anyone points LOCKEDIN_CONFIG at the repo — it holds password
 # hashes, and every machine should generate its own
 config.json
+
+# the deploy CLI's project link, written next to the page it uploads
+.vercel/

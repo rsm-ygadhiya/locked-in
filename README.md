@@ -382,6 +382,44 @@ and every access rule lives in the database policies, so a visitor still has to 
 as a proctor to see a single student. `--local-only` binds it to this machine, and
 `--stop` ends it.
 
+### Hosting the dashboard
+
+`serve.py` ties the dashboard to one machine on one network, which is right in a room and
+brittle everywhere else. The address is whatever DHCP handed that laptop, so a lease
+renewed mid-session moves it and the iPad in the proctor's hand is pointed at an address
+nobody answers on any more. `localhost` and `.local` have a quieter version of the same
+problem, since the server binds IPv4 only and both of those resolve to IPv6 first.
+
+The page does not need a server of its own to avoid that. It is one file with the project
+URL and the anon key already in it, talking to Supabase over HTTPS from the proctor's own
+browser — so any static host will serve it, and the proctor gets one address that keeps
+working when the network underneath it changes:
+
+```bash
+cd server/dashboard
+npx vercel deploy --temporary                   # no account: a public HTTPS URL, good for an hour
+npx vercel login && npx vercel deploy --prod    # or an address that stays
+```
+
+GitHub Pages needs no command at all — turn it on for the repository root, and the
+`index.html` at the top of this repo redirects to `server/dashboard/`.
+
+Either way, paste the address into Faculty → Exam settings → Proctoring → dashboard
+address. The Faculty button then opens the hosted page instead of starting a server, and
+a proctor can watch from a phone on cellular rather than having to be on the students'
+wi-fi. Nothing about the exam itself changes: students talk to Supabase directly and
+never to this page, so where it is hosted decides only who can load it.
+
+One thing hosting does change is the size of the room. "Anyone on my wi-fi" and "anyone
+with the link" are different audiences, and the second one is the whole internet if the
+link ever gets out. The anon key on the page is public by design and every access rule
+lives in the database policies, so a visitor still has to sign in as a proctor to see a
+single student — which means **the password on that proctor account is the only thing
+between a stranger and a class's check-in photos.** Do not host a page pointed at a
+project whose proctor password is published, and that includes the demo project this repo
+ships with. For anything real, stand up your own ([docs/SETUP.md](docs/SETUP.md)) with a
+password nobody has read.
+
 ### Adding more machines to an exam
 
 Any number of machines can sit the same exam — each one needs the project details, and
