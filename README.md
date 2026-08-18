@@ -440,10 +440,16 @@ page is three directories down:
 - **Root Directory `server/dashboard`** — publishes the page and nothing else. The
   cleanest option, and what a one-shot `cd server/dashboard && vercel deploy` already
   did.
-- **Root Directory left at the repository root** — `vercel.json` rewrites `/` to
-  `server/dashboard/index.html`, so the address is still just the domain. This also
-  publishes the source and the prebuilt app, which is fine for a public repo and not
-  for a private one.
+- **Root Directory left at the repository root** — `vercel.json` redirects `/` to
+  `server/dashboard/`, so the bare domain still lands on the dashboard, one hop later.
+  This also publishes the source and the prebuilt app, which is fine for a public repo
+  and not for a private one.
+
+  A redirect rather than a rewrite, which is not a detail: Vercel checks the filesystem
+  before applying rewrites, and the repository root has an `index.html` of its own —
+  the stub that gives GitHub Pages a short address. That file wins any rewrite, so a
+  rewrite silently does nothing and the bare domain serves the stub. Redirects are
+  evaluated before the filesystem, so they actually happen.
 
 Either way the page is static and talks to Supabase from the proctor's own browser, so
 there is no server to configure and no environment variable to set. Signing in needs a
