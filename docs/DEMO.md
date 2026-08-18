@@ -2,8 +2,8 @@
 
 Written for someone who has been handed this repo and asked whether it works, or
 whether it should be allowed anywhere near a real exam — a colleague, a supervisor, or
-whoever in IT gets to say no. It takes about ten minutes end to end, and you can stop
-after step 1 if you only want to see the proctor's side.
+whoever in IT gets to say no. It takes about ten minutes end to end, and you can stop after step 1 if you only want
+to see the proctor's side — that step changes nothing on the machine.
 
 The demo credentials below are published in this repo on purpose. **Which is exactly
 why the project they belong to must never run a real exam** — see
@@ -54,7 +54,23 @@ holds only the anon key, which is designed to be public.
 you read out to the room, and an **exit code** you keep to yourself. Make one called
 something like `Demo` with join code `DEMO`, pointed at any site you like.
 
-## 2. Sit the exam as a student (5 minutes)
+## 2. Point the machine at the project (30 seconds)
+
+A fresh clone has a working dashboard and an unconfigured machine — the project is
+baked into the page, but nothing has told the *app* about it, so it would run in
+standalone mode with no check-in and no join code. With the server from step 1 still
+running:
+
+```bash
+uv run --script src/lockedin_config.py enroll http://127.0.0.1:8765
+```
+
+Use the wi-fi address instead of `127.0.0.1` to do the same on any other machine on the
+network — that is how you'd set up a second student laptop. It copies the project URL,
+the anon key and the ID domain, and touches nothing else. Faculty → Exam settings →
+Proctoring shows what it wrote, and **Test the connection** confirms it.
+
+## 3. Sit the exam as a student (5 minutes)
 
 On the same machine, or a different one:
 
@@ -82,7 +98,7 @@ deliberate fallback for when the network is down. Chrome goes back to normal, th
 policy is removed, and the recording is finalized on the Desktop under
 `LockedIn-Recordings/`.
 
-## 3. The part IT usually asks about
+## 4. The part IT usually asks about
 
 **What leaves the machine.** In standalone mode, nothing at all. In proctored mode:
 two identity photos once, then two ~10 KB thumbnails per student overwritten in place

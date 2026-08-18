@@ -36,8 +36,13 @@ included:
 | Unlock passcode (ends a locked session) | `admin`, on a fresh install |
 
 ```bash
-uv run --script server/serve.py     # then open the address it prints, on any device
+uv run --script server/serve.py                              # the proctor's dashboard
+uv run --script src/lockedin_config.py enroll http://127.0.0.1:8765   # then this machine
 ```
+
+The first line prints an address you can open from any device on your wi-fi. The second
+points this machine at the same project, which a fresh clone needs before the student
+side does anything but a standalone lockdown.
 
 **[docs/DEMO.md](docs/DEMO.md)** walks through it: look at the proctor's side without
 changing anything, then sit a real exam on the same machine and watch yourself appear on

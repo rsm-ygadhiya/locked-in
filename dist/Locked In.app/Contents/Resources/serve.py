@@ -122,12 +122,47 @@ def dashboard_html() -> bytes:
     return html.encode("utf-8")
 
 
+PLACEHOLDERS = ("xxxxxxxx.supabase.co", "eyJhbGciOi...")
+
+
+def page_constants() -> dict:
+    """
+    The project baked into index.html, if there is a real one in there.
+
+    A fresh clone has a configured dashboard and an unconfigured machine: the page
+    carries whatever project this repo was published with, and the settings file is
+    empty because nobody has opened the panel yet. Reading the page back means such a
+    machine can be enrolled from the repo it was cloned from, instead of somebody
+    copying a 200-character key out of an HTML file by hand.
+    """
+    html = (dashboard_dir() / "index.html").read_text(encoding="utf-8")
+    found = {}
+    for name, key in (("SUPABASE_URL", "url"),
+                      ("SUPABASE_ANON_KEY", "anon_key"),
+                      ("ID_EMAIL_DOMAIN", "id_email_domain")):
+        match = re.search(r'const\s+' + name + r'\s*=\s*"([^"]*)"', html)
+        value = (match.group(1).strip() if match else "")
+        if value and not any(mark in value for mark in PLACEHOLDERS):
+            found[key] = value
+    return found
+
+
+def resolved_cloud() -> dict:
+    """The page's project, overridden by anything this machine has been told."""
+    cloud = dict(page_constants())
+    cloud.update({key: value
+                  for key, value in (store.load(create=True).get("cloud") or {}).items()
+                  if value not in (None, "")})
+    return cloud
+
+
 def setup_payload() -> tuple[int, bytes]:
     """The proctoring block, for `lockedin_config.py enroll` on another machine."""
-    cloud = store.load(create=True).get("cloud") or {}
+    cloud = resolved_cloud()
     if not cloud.get("url") or not cloud.get("anon_key"):
-        body = {"error": "This machine has no Supabase project configured yet. "
-                         "Set one under Faculty > Exam settings > Proctoring first."}
+        body = {"error": "No Supabase project here to share — neither this machine's "
+                         "settings nor the dashboard page names one. Set one under "
+                         "Faculty > Exam settings > Proctoring first."}
         return 409, json.dumps(body, indent=2).encode()
     payload = {
         "url": cloud.get("url", ""),
@@ -170,7 +205,7 @@ in its browser &mdash; that is the dashboard.</p>
 
 
 def enroll_html(base: str) -> bytes:
-    cloud = store.load(create=True).get("cloud") or {}
+    cloud = resolved_cloud()
     return ENROLL_PAGE.format(
         base=base,
         url=cloud.get("url") or "(not set on this machine yet)",

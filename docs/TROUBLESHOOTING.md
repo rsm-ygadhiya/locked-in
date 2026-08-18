@@ -103,6 +103,13 @@ file with the `LOCKEDIN_CONFIG` environment variable.
 The `.py` helpers are not where the lockdown looks. It checks beside the script first,
 then `../src/`. Keep the repo layout intact, or flatten everything into one folder.
 
+**Student gets the recording notice instead of the check-in window.** That machine is
+in standalone mode: proctored mode switches on only once a project URL and anon key are
+in its settings. A fresh clone has neither, even though the dashboard page it ships with
+does. Fix it in one line, with the dashboard server running:
+`uv run --script src/lockedin_config.py enroll http://127.0.0.1:8765` — or fill the two
+fields in under Faculty → Exam settings → Proctoring.
+
 **The lockdown starts but there is no video, or `camera.mp4` is missing.** Read
 `recorder.log` in the session folder — it records permission failures verbatim. On
 macOS the answer is almost always Screen Recording or Camera not granted to Terminal.
