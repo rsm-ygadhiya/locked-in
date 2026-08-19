@@ -269,10 +269,18 @@ agree, click Cancel — nothing is recorded and nothing on this Mac is changed."
 		[[ "$RECORD_AUDIO"  != true ]] && REC_FLAGS+=("--no-audio")
 		# In a proctored exam the recorder also keeps two small JPEGs current for
 		# uploader.py to publish to the proctor's dashboard.
-		# Live tiles are what the proctor's grid shows. An exam can turn them off
-		# and still be proctored: the queue, the timeline and who is connected all
-		# keep working, there are simply no pictures.
-		[[ "$PROCTORED" == true && "${LIVE_TILES:-true}" == true ]] && REC_FLAGS+=("--live-tiles")
+		# --live-tiles is what makes the recorder keep two small JPEGs current on
+		# disk. Both the live grid and the kept frames are published from those same
+		# two files, so it has to be on if *either* is wanted — turning it off
+		# because the grid is off would silently stop the kept frames as well, which
+		# is the setting somebody chose on purpose.
+		#
+		# What the proctor actually sees is decided further down, by whether the
+		# uploader is told --no-tiles.
+		WANT_TILES=false
+		[[ "${LIVE_TILES:-true}" == true ]] && WANT_TILES=true
+		[[ -n "${EXAM_SNAP_INTERVAL:-}" && "${EXAM_SNAP_INTERVAL:-0}" != 0 ]] && WANT_TILES=true
+		[[ "$PROCTORED" == true && "$WANT_TILES" == true ]] && REC_FLAGS+=("--live-tiles")
 		mkdir -p "$SESSION_DIR"
 		echo "Starting the recording (first run installs the Python packages, ~30s)..."
 		"${PY_RUNNER[@]}" "$RECORDER" --out-dir "$SESSION_DIR" "${REC_FLAGS[@]}" \

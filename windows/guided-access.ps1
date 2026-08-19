@@ -308,10 +308,11 @@ function Start-Recording {
     if (-not $useScreen) { $recArgs += "--no-screen" }
     if (-not $useCamera) { $recArgs += "--no-camera" }
     if (-not $useAudio)  { $recArgs += "--no-audio" }
-    # In a proctored exam the recorder also keeps two small JPEGs current for
-    # uploader.py to publish to the proctor's dashboard — unless the exam turned
-    # the live grid off, in which case there is nothing to keep current.
-    if ($Proctored -and $LiveTiles) { $recArgs += "--live-tiles" }
+    # The recorder keeps two small JPEGs current on disk, and both the live grid
+    # and the kept frames are published from those same two files — so this goes on
+    # if either is wanted. What the proctor sees is decided by --no-tiles on the
+    # uploader, further down.
+    if ($Proctored -and ($LiveTiles -or $SnapEvery -gt 0)) { $recArgs += "--live-tiles" }
 
     $script:RecProc = Start-Process -FilePath $PyExe `
         -ArgumentList (Quote-Args ($PyArgs + $recArgs)) `
