@@ -194,7 +194,11 @@ select public.verify_exit_code('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'letmeout
        as accepted;
 -- The stamp is the whole point: it is what tells a proctor this session ended on
 -- purpose rather than being force-quit.
-select exit_verified_at is not null as exit_was_verified
+-- Printed as a word, not a bare t: an earlier version of this test checked for
+-- "^t$" and matched the *previous* query's output, so a stamp that never happened
+-- passed for days.
+select case when exit_verified_at is not null then 'STAMPED' else 'NOT-STAMPED' end
+       as exit_stamp
 from public.sessions where id = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
 \echo '    PASS'
 

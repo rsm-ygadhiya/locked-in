@@ -402,13 +402,24 @@ begin
         raise exception 'this session was rejected; ask the proctor to reset it';
     end if;
 
-    -- The decision fields are the proctor's record, not the student's. So is the
-    -- exit stamp: it exists to say whether a correct code was ever typed, and a
-    -- value the student can write says nothing at all.
-    new.decided_at       := old.decided_at;
-    new.decided_by       := old.decided_by;
-    new.reject_reason    := old.reject_reason;
-    new.exit_verified_at := old.exit_verified_at;
+    -- The decision fields are the proctor's record, not the student's.
+    new.decided_at    := old.decided_at;
+    new.decided_by    := old.decided_by;
+    new.reject_reason := old.reject_reason;
+
+    -- So is the exit stamp — a value the student can write says nothing at all.
+    -- The exception is the stamp verify_exit_code() makes after accepting a code:
+    -- that update arrives here as the student, because it is their session and
+    -- their token, and putting it back would erase the one honest record of how
+    -- the session ended.
+    --
+    -- The flag is transaction-local and set only inside that definer function.
+    -- A student cannot set it: PostgREST exposes functions in public, not
+    -- set_config from pg_catalog, and each request is its own transaction — so
+    -- there is no request that both sets the flag and updates the row.
+    if coalesce(current_setting('lockedin.exit_stamp', true), 'off') <> 'on' then
+        new.exit_verified_at := old.exit_verified_at;
+    end if;
 
     return new;
 end;
@@ -531,6 +542,10 @@ begin
     end if;
 
     if stored = crypt(btrim(p_code), stored) then
+        -- Tells the guard trigger that this particular write is the server's own.
+        -- True as the third argument = local to this transaction, so it is gone
+        -- the moment this call returns.
+        perform set_config('lockedin.exit_stamp', 'on', true);
         -- Record that this exam's own code was accepted, for whoever typed it. A
         -- proctor releasing a machine stamps the session they are standing at; a
         -- student typing a code they should not have stamps their own. Either way
@@ -543,6 +558,7 @@ begin
           and  (s.student_id = auth.uid()
                 or exists (select 1 from public.exams e
                            where e.id = p_exam and e.faculty_id = auth.uid()));
+        perform set_config('lockedin.exit_stamp', 'off', true);
         return true;
     end if;
     return false;

@@ -95,8 +95,10 @@ grep -q "^approved|t|t$" <<<"$OUTPUT" \
 	|| fail "faculty approval did not stamp decided_by and decided_at"
 
 # The exit code has to be accepted, and accepting it has to stamp the session.
-grep -q "^t$" <<<"$OUTPUT" \
-	|| fail "verify_exit_code refused the right code, or did not stamp exit_verified_at"
+grep -q "^STAMPED$" <<<"$OUTPUT" \
+	|| fail "the right exit code did not stamp exit_verified_at — the guard trigger is eating it"
+grep -q "^NOT-STAMPED$" <<<"$OUTPUT" \
+	&& fail "exit_verified_at was not stamped by a correct code"
 # ATTACK 5 prints one 0, ATTACK 8 two, ATTACK 10 one, ATTACK 12 one (no forged stamp).
 # Fewer than five means something leaked. ATTACK 11 is checked separately, by what
 # survived it.
