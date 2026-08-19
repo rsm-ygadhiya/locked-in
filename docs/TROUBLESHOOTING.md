@@ -49,6 +49,14 @@ Settings → Privacy & Security. Consequences worth knowing:
 right-click → **Open** → **Open**. Distributing it to a lab means either doing that on
 each machine, or signing it with a paid Developer ID.
 
+**Chrome does not go fullscreen by itself.** Fixed, and worth knowing what it was:
+the lockdown used to send ⌃⌘F through System Events, which silently does nothing
+unless Terminal has Accessibility permission — so the window came up ordinary and
+somebody had to full-screen it by hand. It now starts Chrome in its own `--kiosk`
+mode, which needs no permission at all. The flags only apply to a cold start, which
+is why the lockdown quits Chrome before launching it; if Chrome somehow survives
+that, the old keystroke is still there as a backstop.
+
 ### On Windows
 
 **The Windows half has not been tested.** Both platforms read the same settings file and
@@ -126,9 +134,22 @@ fields in under Faculty → Exam settings → Proctoring.
 macOS the answer is almost always Screen Recording or Camera not granted to Terminal.
 Recording failures never stop the exam, which is why this is easy to miss.
 
-**The webcam films the ceiling, or a desk.** macOS offers an iPhone over Continuity
-Camera alongside the built-in one, and it can land at index 0. `recorder.py` ranks
-devices so the laptop camera wins, but you can force it: `--camera-index N`.
+**The webcam films the ceiling, or a desk — it picked the phone.** Two separate
+causes, both now handled, and `recorder.log` says which one you hit.
+
+Current macOS reports an iPhone offered over Continuity as
+`AVCaptureDeviceTypeExternal` — the same type as a plugged-in USB webcam — so ranking
+by device type alone never demoted it. Names are checked too now: anything called
+iPhone, iPad, Continuity or Desk View goes to the back of the queue.
+
+The other cause is subtler. A camera released a second ago still refuses to open for
+a moment, so the laptop camera looked *missing* right after the check-in window
+closed, and the next candidate was the phone. The preferred cameras now get several
+attempts over a few seconds before anything worse is tried, and if a phone is ever
+used the log says so in as many words.
+
+Still stuck: `--camera-index N` forces one, and `uv run --script src/recorder.py
+--list-cameras` shows what the machine offers.
 
 **Chrome opens on the wrong site, or blocks the exam site.** The allowed hosts list is
 hostnames, not URLs, and SSO and 2FA hosts need to be on it too — a login that redirects

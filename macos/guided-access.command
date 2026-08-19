@@ -422,6 +422,7 @@ log_exit_kind() {
 		case "$kind" in
 			exit.code)     detail="the exam's own exit code was accepted" ;;
 			exit.passcode) detail="this machine's local passcode was used" ;;
+			exit.proctor)  detail="the proctor ended the exam from the dashboard" ;;
 			*)             kind="exit.signal" ;;
 		esac
 	fi
@@ -554,6 +555,29 @@ end passcodeAccepted
 
 -- POSIX file / "exists" is fussy about paths that do not exist yet, so ask the
 -- shell instead: it is one process every 0.3s and it never raises.
+-- Cold-start Chrome with its own kiosk mode. open -na is what makes the flags
+-- apply: without -n an already-running Chrome just gets a new window and ignores
+-- them, which is the difference between a locked screen and a browser somebody can
+-- ⌘Tab away from.
+on launchKiosk(allowedURL)
+	try
+		do shell script "open -na 'Google Chrome' --args --kiosk " & ¬
+			"--disable-session-crashed-bubble --no-first-run --no-default-browser-check " & ¬
+			quoted form of allowedURL
+	on error
+		-- No Chrome at that name, or open refused: fall back to the old way so the
+		-- exam still starts.
+		try
+			tell application "Google Chrome"
+				activate
+				if (count of windows) is 0 then make new window
+				set URL of active tab of front window to allowedURL
+			end tell
+			tell application "System Events" to keystroke "f" using {control down, command down}
+		end try
+	end try
+end launchKiosk
+
 on fileExists(path)
 	try
 		do shell script "test -e " & quoted form of path
@@ -592,18 +616,26 @@ on run argv
 	end repeat
 	delay 1
 
-	-- ---------- Open Chrome at the allowed URL, fullscreen ----------
-	tell application "Google Chrome"
-		activate
-		if (count of windows) is 0 then make new window
-		set URL of active tab of front window to allowedURL
+	-- ---------- Open Chrome at the allowed URL, in kiosk mode ----------
+	-- Chrome's own --kiosk: fullscreen, no tab strip, no omnibox, and no Dock or
+	-- menu bar. It replaces sending ⌃⌘F through System Events, which needed
+	-- Accessibility permission for Terminal and did nothing at all without it —
+	-- which is why the window kept coming up as an ordinary one that somebody had
+	-- to full-screen by hand.
+	--
+	-- The flags only apply to a cold start, which is why the caller kills Chrome
+	-- first.
+	my launchKiosk(allowedURL)
+	delay 2
+	-- Backstop for the case where Chrome was already running and ignored the flags.
+	tell application "System Events"
+		if not (exists (process "Google Chrome")) then return
 	end tell
-	delay 1
-	-- Enter macOS fullscreen so the Dock + menu bar are hidden (kiosk feel).
 	try
-		tell application "System Events" to keystroke "f" using {control down, command down}
+		tell application "Google Chrome"
+			if (count of windows) is 0 then make new window
+		end tell
 	end try
-	delay 1
 
 	-- ---------- Lockdown loop ----------
 	repeat
@@ -623,16 +655,15 @@ on run argv
 			end tell
 
 			if targetApp is not in runningNames then
-				-- Chrome was closed: relaunch INSTANTLY and force it back to the site...
-				tell application "Google Chrome"
-					activate
-					if (count of windows) is 0 then make new window
-					set URL of active tab of front window to allowedURL
-				end tell
+				-- Chrome was closed: relaunch INSTANTLY, in kiosk again, and force it
+				-- back to the site...
+				my launchKiosk(allowedURL)
 				delay 1
-				-- put it back into fullscreen kiosk mode
 				try
-					tell application "System Events" to keystroke "f" using {control down, command down}
+					tell application "Google Chrome"
+						if (count of windows) is 0 then make new window
+						set URL of active tab of front window to allowedURL
+					end tell
 				end try
 				-- ...then DEMAND the passcode. The prompt keeps coming back until the
 				-- correct passcode is entered — it cannot be cancelled or escaped.

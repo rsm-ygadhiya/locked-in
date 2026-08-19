@@ -193,6 +193,14 @@ def run(cloud: lockedin_cloud.Cloud, session_id: str, session_dir: Path,
                     log("a proctor ended the exam — releasing this machine")
                     cloud.log_event(session_id, "exit.proctor",
                                     "released from the dashboard")
+                    # Both files matter. RELEASE is what the lockdown watches for;
+                    # exit-kind is what its cleanup reports afterwards. Without the
+                    # second one the cleanup finds no marker, assumes nobody typed
+                    # anything, and logs "ended without a verified exit code" —
+                    # which would flag every student in a room the proctor released
+                    # on purpose.
+                    (session_dir / "exit-kind").write_text("exit.proctor",
+                                                           encoding="utf-8")
                     (session_dir / "RELEASE").touch()
             except lockedin_cloud.CloudError as error:
                 # Offline is not a release. The exam carries on and the machine

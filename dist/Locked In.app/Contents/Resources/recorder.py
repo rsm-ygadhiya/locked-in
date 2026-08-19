@@ -303,9 +303,29 @@ CAMERA_PREFERENCE = {
     "AVCaptureDeviceTypeBuiltInWideAngleCamera": 100,
     "AVCaptureDeviceTypeExternal": 10,          # a plugged-in USB webcam is fine
     "AVCaptureDeviceTypeExternalUnknown": 10,
-    "AVCaptureDeviceTypeContinuityCamera": -50,  # the iPhone
+    "AVCaptureDeviceTypeContinuityCamera": -50,  # the iPhone, when macOS says so
     "AVCaptureDeviceTypeDeskViewCamera": -100,   # points down at the desk
 }
+
+# ...and when it does not. On current macOS an iPhone offered over Continuity is
+# reported as AVCaptureDeviceTypeExternal — the same type as a USB webcam — so the
+# rule above never fires and the phone ranks as a perfectly good camera. It is not:
+# it films a desk, a ceiling, or a pocket, and it walks out of the room with the
+# student. The name is the only thing left that tells them apart.
+PHONE_NAMES = ("iphone", "ipad", "continuity", "desk view")
+
+
+def looks_like_a_phone(name: str) -> bool:
+    lowered = (name or "").lower()
+    return any(word in lowered for word in PHONE_NAMES)
+
+
+def camera_score(name: str, kind: str) -> int:
+    """How much we want this camera. Lower is worse; negative means last resort."""
+    score = CAMERA_PREFERENCE.get(kind, 0)
+    if looks_like_a_phone(name):
+        score = min(score, -50)
+    return score
 
 
 def camera_candidates(requested: int) -> list[int]:
@@ -323,7 +343,7 @@ def camera_candidates(requested: int) -> list[int]:
         ordered = [] if requested < 0 else [requested]
         return ordered + [i for i in range(4) if i != requested]
 
-    ranked = sorted(devices, key=lambda d: (-CAMERA_PREFERENCE.get(d[2], 0), d[0]))
+    ranked = sorted(devices, key=lambda d: (-camera_score(d[1], d[2]), d[0]))
     order = [index for index, _, _ in ranked]
     if requested >= 0:
         order = [requested] + [i for i in order if i != requested]
@@ -355,26 +375,63 @@ def open_camera(preferred: int = -1):
 
     indices = camera_candidates(preferred)
     named = {index: name for index, name, _ in macos_video_devices()}
+    kinds = {index: kind for index, _, kind in macos_video_devices()}
 
-    for backend, backend_name in backends:
-        for index in indices:
-            camera = cv2.VideoCapture(index, backend)
-            if not camera.isOpened():
+    # Good cameras first, and *patiently*. A camera that was in use a second ago —
+    # by the check-in window that just closed, by Zoom, by Photo Booth — reports
+    # itself unopenable for a moment after being released. Falling straight through
+    # to the next candidate on that first refusal is how an exam ends up filmed by
+    # the phone on the desk: the laptop camera was not missing, it was busy.
+    #
+    # So the ranked-good ones get several passes over a few seconds, and only then
+    # does anything negative get a turn.
+    good = [i for i in indices if camera_score(named.get(i, ""), kinds.get(i, "")) >= 0]
+    poor = [i for i in indices if i not in good]
+
+    def attempt(order: list[int]):
+        for backend, backend_name in backends:
+            for index in order:
+                camera = cv2.VideoCapture(index, backend)
+                if not camera.isOpened():
+                    camera.release()
+                    continue
+                camera.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+                camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+                # Cameras routinely need a moment to warm up before the first good
+                # frame.
+                for _ in range(10):
+                    ok, frame = camera.read()
+                    if ok and frame is not None:
+                        label = named.get(index, f"index {index}")
+                        log(f"camera: using \"{label}\" ({backend_name} index {index})")
+                        if looks_like_a_phone(label):
+                            # Worth its own line: an exam filmed by a phone on the
+                            # desk is not filming the student, and the proctor should
+                            # be able to find out why afterwards.
+                            log("camera: WARNING that looks like a phone, not the "
+                                "built-in camera — the laptop's own camera was busy "
+                                "or unavailable for several seconds")
+                        return camera, frame
+                    time.sleep(0.2)
+                log(f"camera: {backend_name} index {index} opened but sent no frames "
+                    "— trying the next one")
                 camera.release()
-                continue
-            camera.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-            camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-            # Cameras routinely need a moment to warm up before the first good frame.
-            for _ in range(10):
-                ok, frame = camera.read()
-                if ok and frame is not None:
-                    label = named.get(index, f"index {index}")
-                    log(f"camera: using \"{label}\" ({backend_name} index {index})")
-                    return camera, frame
-                time.sleep(0.2)
-            log(f"camera: {backend_name} index {index} opened but sent no frames — "
-                "trying the next one")
-            camera.release()
+        return None, None
+
+    for attempt_number in range(4):
+        camera, frame = attempt(good)
+        if camera is not None:
+            return camera, frame
+        if attempt_number < 3:
+            log("camera: the preferred camera is not answering yet — waiting a "
+                f"second and trying again ({attempt_number + 1}/3)")
+            time.sleep(1.0)
+
+    if poor:
+        log("camera: falling back to a camera we would rather not use")
+        camera, frame = attempt(poor)
+        if camera is not None:
+            return camera, frame
 
     return None, None
 
