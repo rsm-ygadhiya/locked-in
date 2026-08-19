@@ -185,6 +185,11 @@ typed, and the lockdown treated that as a wrong code rather than as "this exam h
 code", so the machine's own passcode was never tried and Force Quit was the only way
 out. The lockdown now asks whether the exam has a code before refusing.
 
+**A student force-quit and nothing was flagged.** By design, since you asked for
+flags on leaving rather than on silence: a force quit writes nothing, so there is no
+"leaving" to report. It shows as a red tile on the live grid while the exam runs, and
+that is the only sign. If the grid is off too, there is none.
+
 **"Ended without the exit code" on somebody who finished normally.** The stamp comes
 from the server when a correct exit code is verified, so it means exactly one thing:
 that exam's own code was not typed on that machine. The usual innocent explanation is
@@ -248,6 +253,11 @@ button in Faculty → Exam settings → Proctoring. It keeps running after the p
 the launcher close, which is the point — it should outlive them, not the exam.
 
 ### Exams
+
+**The join code is taken.** Codes are unique among *live* exams only. Archive the
+exam holding it — everything is kept — and the code is free immediately. Restoring
+that exam later fails if somebody has since taken the code, and says so.
+
 
 **"Could not create it" when you press Create.** Almost always the join code: they are
 unique across the entire project, not per proctor, so a code another proctor used —

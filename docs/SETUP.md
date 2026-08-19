@@ -219,6 +219,17 @@ Clearing them returns the machine to standalone mode.
    and an **exit code**.
 3. Read the **join code** out to the room. Keep the **exit code** to yourself.
 
+**Live proctoring** is the master switch on each exam's row. Off means nothing is
+published while students sit it — no grid, no kept frames — and you are still told
+who left without entering the exit code. That is the setting for an exam you are
+invigilating in person, where a wall of webcam tiles is stress you do not need and
+the only thing worth knowing is who walked out.
+
+**Archive** an exam when it is over. Everything is kept — sessions, photos, kept
+frames, timelines — so it is all still there when a grade is queried, and the join
+code is released for the next exam to use. **Delete for good** once the grades are
+settled.
+
 Each exam also carries what it records — **Screen**, **Webcam**, **Microphone**,
 **Live tiles**, and how often a frame is kept. Those are the exam's, not the machine's:
 a student sitting this exam records what you chose here whatever their own settings

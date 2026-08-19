@@ -349,11 +349,12 @@ function Stop-Recording {
 # process, and a stalled upload must never cost frames of the exam recording. If this
 # dies the recording carries on and the dashboard just shows the student as stale.
 function Start-Uploading {
-    if (-not $Proctored -or -not $UploaderPy -or -not $script:RecProc) {
-        if ($Proctored -and -not $script:RecProc) {
-            Write-Host "WARNING: nothing is being recorded, so there is no live feed either."
-        }
-        return
+    # Deliberately not gated on the recorder: this process carries the heartbeat,
+    # the events, the flip to 'ended' and how it ended. An exam that records nothing
+    # still wants all four, and with every stream off the recorder exits by design.
+    if (-not $Proctored -or -not $UploaderPy) { return }
+    if (-not $script:RecProc) {
+        Write-Host "Nothing is being recorded for this exam; still reporting check-ins and exits."
     }
     $upArgs = @($UploaderPy, "--session-dir", $SessionDir,
                 "--session-id", $LiveSession,

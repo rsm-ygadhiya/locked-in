@@ -347,11 +347,22 @@ class Cloud:
     # ---------- exams ----------
 
     def exam_by_code(self, join_code: str) -> dict | None:
-        """Resolve a join code to an open exam, or None if there is no such exam."""
+        """
+        Resolve a join code to an open exam, or None if there is no such exam.
+
+        Selects every column, not a list: the exam carries what it records, and a
+        column missing from the select silently becomes a default on the student's
+        machine — an exam that says "do not film the webcam" would film it.
+
+        Open only, newest first, because a join code can be reused once the exam
+        that had it is archived. Two rows can share a code; only one of them is
+        still taking students.
+        """
         code = join_code.strip().upper()
         rows = self._json("GET", "/rest/v1/exams",
-                          params={"select": "id,title,allowed_url,is_open,join_code",
-                                  "join_code": f"eq.{code}", "limit": 1})
+                          params={"select": "*", "join_code": f"eq.{code}",
+                                  "is_open": "eq.true", "order": "created_at.desc",
+                                  "limit": 1})
         if isinstance(rows, list) and rows:
             return rows[0]
         return None

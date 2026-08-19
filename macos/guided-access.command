@@ -309,7 +309,14 @@ fi
 # process, and a stalled upload must never cost frames of the exam recording. If
 # this dies, the recording carries on and the dashboard simply shows the student as
 # stale.
-if [[ "$PROCTORED" == true && -n "$UPLOADER_PY" && -n "$REC_PID" ]]; then
+#
+# It runs whether or not the recorder does, and that is not a detail. This process
+# carries the things that are not pictures: the heartbeat, the events, the flip to
+# 'ended', and the note saying how the session ended. An in-person exam that records
+# nothing and publishes nothing still wants all four — and with every stream turned
+# off the recorder exits on purpose, which used to take the uploader with it and
+# silently ended the flagging along with the pictures.
+if [[ "$PROCTORED" == true && -n "$UPLOADER_PY" ]]; then
 	UPLOAD_FLAGS=()
 	# The exam's own cadence for kept frames, and whether the grid gets pictures
 	# at all. Both come from the exam row; the machine's settings only decide when

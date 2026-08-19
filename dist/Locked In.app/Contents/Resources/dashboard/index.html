@@ -287,7 +287,8 @@
 
     <section id="alerts" class="card alert" hidden>
       <div class="row" style="align-items:baseline;margin-bottom:10px">
-        <h2 style="margin:0">Needs a look (<span id="alertCount">0</span>)</h2>
+        <h2 style="margin:0">Left without the exit code (<span id="alertCount">0</span>)</h2>
+        <span class="sub" id="alertsHint" style="margin-left:14px"></span>
         <span class="sub" style="margin-left:auto" id="notifyState"></span>
       </div>
       <div id="alertList"></div>
@@ -302,6 +303,14 @@
       <div id="examList"></div>
       <p id="examsEmpty" class="empty">No exams yet. <b>Add an exam</b> to make one —
         you read the join code out to the room, and keep the exit code to yourself.</p>
+    </section>
+
+    <section id="archivedCard" class="card" hidden>
+      <h2 style="margin-bottom:6px">Archived (<span id="archivedCount">0</span>)</h2>
+      <p class="sub" style="margin-bottom:12px">Finished, and kept in full — sessions,
+        photos, kept frames, timelines. Their join codes are free for new exams to
+        use. Delete one once its grades are settled.</p>
+      <div id="archivedList"></div>
     </section>
 
     <section id="newExam" class="card" hidden>
@@ -387,6 +396,7 @@
       <h2>Live (<span id="liveCount">0</span>)</h2>
       <div id="grid" class="grid"></div>
       <p id="gridEmpty" class="empty">No approved students are running yet.</p>
+      <p id="gridOff" class="empty" hidden></p>
     </section>
 
     <section>
@@ -416,11 +426,6 @@ const REFRESH_MS = 3000;
 // A student whose heartbeat is older than this is shown as stale — laptop asleep,
 // app closed, or network gone.
 const STALE_MS = 20000;
-// Stale means "the app stopped checking in a moment ago" — a sleeping laptop, a
-// dropped wifi, a closed lid, all of which come back. Gone is the same silence
-// held long enough that it needs a proctor to look, and it is the signal for a
-// student who force-quit rather than typing a code.
-const GONE_MS = 90000;
 // Signed image URLs live slightly longer than one refresh, so a tile never shows
 // a broken image while the next URL is being minted.
 const SIGNED_TTL = 30;
@@ -690,7 +695,10 @@ async function loadExitCodes() {
 }
 
 function paintExams() {
-  $("examCount").textContent = exams.length;
+  const live = exams.filter((e) => !e.archived_at);
+  const archived = exams.filter((e) => e.archived_at);
+  paintArchived(archived);
+  $("examCount").textContent = live.length;
   const stale = $("examsStale");
   if (stale) {
     stale.hidden = codesReadable || !exams.length;
@@ -702,7 +710,7 @@ function paintExams() {
   const list = $("examList");
   list.innerHTML = "";
 
-  for (const exam of exams) {
+  for (const exam of live) {
     const code = exitCodes[exam.id];
     const shown = revealed.has(exam.id);
     // An exam created before exit codes existed, or created without one, has
@@ -734,14 +742,23 @@ function paintExams() {
       <span class="pill${exam.is_open ? " open" : ""}">${
         exam.is_open ? "open" : "closed"}</span>
       <div class="rec">
+        <button class="chip${watching(exam) ? " on" : ""}"
+          onclick="toggleLiveProctoring('${exam.id}')"
+          title="${watching(exam)
+            ? "Screens and webcams are being published while students sit this exam"
+            : "Nothing is published — students still check in, and you are still told who leaves without the exit code"}">
+          ${watching(exam) ? "●" : "○"} Live proctoring</button>
         ${recChip(exam, "record_screen", "Screen")}
         ${recChip(exam, "record_camera", "Webcam")}
         ${recChip(exam, "record_audio", "Microphone")}
-        ${recChip(exam, "live_tiles", "Live tiles")}
-        <button class="chip" onclick="setKeepEvery('${exam.id}')"
-          title="Seconds between frames kept for review. 0 keeps none.">
-          Keep a frame: ${Number(exam.snapshot_interval) > 0
-            ? `every ${exam.snapshot_interval}s` : "off"}</button>
+        ${watching(exam) ? `
+          ${recChip(exam, "live_tiles", "Live tiles")}
+          <button class="chip" onclick="setKeepEvery('${exam.id}')"
+            title="Seconds between frames kept for review. 0 keeps none.">
+            Keep a frame: ${Number(exam.snapshot_interval) > 0
+              ? `every ${exam.snapshot_interval}s` : "off"}</button>`
+        : `<span class="sub" style="align-self:center">no screens or webcams
+             published · you are still told who leaves without the exit code</span>`}
       </div>
       <div class="acts">
         ${codesReadable && code
@@ -751,6 +768,8 @@ function paintExams() {
           : `<button class="small ghost" onclick="changeExitCode('${exam.id}')">${
                code === undefined ? "Set exit code" : "Set a new one"}</button>`}
         <button class="small ghost" onclick="selectExam('${exam.id}')">Watch</button>
+        <button class="small ghost" onclick="archiveExam('${exam.id}')"
+          title="Keep everything, free the join code">Archive</button>
         <button class="small bad" onclick="deleteExam('${exam.id}')">Delete</button>
       </div>`;
     list.appendChild(row);
@@ -764,6 +783,40 @@ function paintExams() {
 // has to recognise both to fall back rather than fail.
 function missingColumn(error) {
   return /does not exist|PGRST204|schema cache/i.test(error.message || "");
+}
+
+// Live proctoring is not a column of its own: it is simply whether this exam
+// publishes anything to watch. Deriving it from the two settings that do the
+// publishing means one switch and no third source of truth to disagree with them.
+function watching(exam) {
+  return exam.live_tiles !== false || Number(exam.snapshot_interval) > 0;
+}
+
+async function toggleLiveProctoring(examId) {
+  const exam = exams.find((e) => e.id === examId);
+  if (!exam) return;
+  const turningOff = watching(exam);
+  const body = turningOff
+    ? { live_tiles: false, snapshot_interval: 0 }
+    : { live_tiles: true, snapshot_interval: 60 };
+  try {
+    await call(`/rest/v1/exams?id=eq.${examId}`, {
+      method: "PATCH", headers: { Prefer: "return=minimal" }, body,
+    });
+    Object.assign(exam, body);
+    paintExams();
+    toast(turningOff
+      ? "Live proctoring off. Nothing is published for this exam — no grid, no kept "
+        + "frames. Students still check in, and you are still told who leaves "
+        + "without the exit code."
+      : "Live proctoring on: tiles on the grid, and a frame kept every 60s.");
+    refresh();
+  } catch (error) {
+    toast(missingColumn(error)
+      ? "This project's database has no per-exam recording settings yet. Run "
+        + "server/schema.sql on it again."
+      : "Could not change it: " + error.message, true);
+  }
 }
 
 function recChip(exam, column, label) {
@@ -826,6 +879,78 @@ async function setKeepEvery(examId) {
         + "server/schema.sql on it again — it adds the columns without touching "
         + "your exams."
       : "Could not change it: " + error.message, true);
+  }
+}
+
+// Archiving keeps everything and releases the join code. That second half is the
+// point: codes are short and human, so the same one comes round again, and a live
+// exam holding MID24 forever would make next quarter's MID24 impossible.
+async function archiveExam(examId) {
+  const exam = exams.find((e) => e.id === examId);
+  if (!exam) return;
+  if (!confirm(
+      `Archive "${exam.title}" (${exam.join_code})?\n\n` +
+      "Everything is kept — sessions, ID photos, kept frames, the timeline — so it "
+      + "is all still here when grades are queried.\n\n"
+      + "What changes: no new students can join, and the join code is free for a "
+      + "new exam to use.")) return;
+  try {
+    await call(`/rest/v1/exams?id=eq.${examId}`, {
+      method: "PATCH", headers: { Prefer: "return=minimal" },
+      body: { archived_at: new Date().toISOString(), is_open: false },
+    });
+    await loadExams();
+    toast(`Archived. ${exam.join_code} is free to use again.`);
+    refresh();
+  } catch (error) {
+    toast(missingColumn(error)
+      ? "This project's database has no archiving yet. Run server/schema.sql on it "
+        + "again — it adds the column without touching your exams."
+      : "Could not archive it: " + error.message, true);
+  }
+}
+
+async function restoreExam(examId) {
+  const exam = exams.find((e) => e.id === examId);
+  if (!exam) return;
+  try {
+    await call(`/rest/v1/exams?id=eq.${examId}`, {
+      method: "PATCH", headers: { Prefer: "return=minimal" },
+      body: { archived_at: null },
+    });
+    await loadExams();
+    toast("Restored. Still closed to new students until you open the door.");
+  } catch (error) {
+    toast(/duplicate key|unique|23505/i.test(error.message)
+      ? `Cannot restore it: a live exam is using ${exam.join_code} now. Change that `
+        + "exam's code first, or leave this one archived."
+      : "Could not restore it: " + error.message, true);
+  }
+}
+
+function paintArchived(archived) {
+  $("archivedCard").hidden = archived.length === 0;
+  $("archivedCount").textContent = archived.length;
+  const list = $("archivedList");
+  list.innerHTML = "";
+  for (const exam of archived) {
+    const row = document.createElement("div");
+    row.className = "exam";
+    row.innerHTML = `
+      <div class="who2">
+        <div class="t">${escapeHtml(exam.title)}</div>
+        <div class="sub">archived ${ago(exam.archived_at)} · everything kept</div>
+      </div>
+      <div class="code">
+        <span class="lbl">Was joined with</span>
+        <span class="val">${escapeHtml(exam.join_code)}</span>
+      </div>
+      <div class="acts">
+        <button class="small ghost" onclick="selectExam('${exam.id}')">Review</button>
+        <button class="small ghost" onclick="restoreExam('${exam.id}')">Restore</button>
+        <button class="small bad" onclick="deleteExam('${exam.id}')">Delete for good</button>
+      </div>`;
+    list.appendChild(row);
   }
 }
 
@@ -922,8 +1047,9 @@ async function createExam() {
     // usual failure is a code somebody else's exam already holds — and the raw
     // constraint error does not say that in any language a person speaks.
     const message = /duplicate key|unique constraint|23505/i.test(error.message)
-      ? `The join code ${code} is already taken. Codes are shared across every ` +
-        "proctor on this project, so try a less obvious one."
+      ? `The join code ${code} is in use by a live exam. Codes are shared across `
+        + "every proctor on this project — archive the exam holding it and the code "
+        + "comes free, or pick another."
       : "Could not create it: " + error.message;
     toast(message, true);
   }
@@ -1223,6 +1349,20 @@ async function paintGrid(sessions) {
   $("liveCount").textContent = live.length;
   $("gridEmpty").hidden = live.length > 0;
 
+  // With live proctoring off there is nothing to fetch and nothing to sign — say
+  // that, rather than showing a grid of empty boxes that looks like a fault.
+  if (currentExam && !watching(currentExam)) {
+    $("gridEmpty").hidden = true;
+    $("grid").innerHTML = "";
+    $("gridOff").hidden = false;
+    $("gridOff").textContent = live.length
+      ? `Live proctoring is off for this exam. ${live.length} student(s) are `
+        + "checked in and running; no screens or webcams are being published."
+      : "Live proctoring is off for this exam.";
+    return;
+  }
+  $("gridOff").hidden = true;
+
   const frames = await loadFrames(live.map((s) => s.id));
   const grid = $("grid");
   grid.innerHTML = "";
@@ -1267,7 +1407,7 @@ async function paintGrid(sessions) {
 // it goes quiet, and silence is what the heartbeat catches.
 // ===========================================================================
 
-const EXIT_EVENTS = ["exit.code", "exit.passcode", "exit.signal"];
+const EXIT_EVENTS = ["exit.code", "exit.passcode", "exit.signal", "exit.proctor"];
 const notified = new Set();
 
 async function loadExitEvents(sessionIds) {
@@ -1287,6 +1427,9 @@ async function loadExitEvents(sessionIds) {
 }
 
 function exitVerdict(session, event) {
+  if (event && event.kind === "exit.proctor") {
+    return { ok: true, label: "you ended this session" };
+  }
   if (session.exit_verified_at) {
     return { ok: true, label: "released with the exit code" };
   }
@@ -1296,11 +1439,17 @@ function exitVerdict(session, event) {
   if (event && event.kind === "exit.signal") {
     return { ok: false, label: "ended without a code — quit, signal or crash" };
   }
-  return { ok: false, label: "ended without the exit code" };
+  return { ok: false, label: "left without entering the exit code" };
 }
 
-// Two things a proctor should not have to notice for themselves: a session that
-// ended without the code, and one that simply stopped talking while it was live.
+// One thing, and only one: a student who left the exam without entering the exit
+// code. Not a laptop that went quiet — a lid closes, a wifi drops, and a proctor
+// standing in the room can see for themselves that the student is still sitting
+// there. And not a session the proctor ended, which needs no explaining.
+//
+// The cost of that narrowness is worth stating: a student who force-quits writes
+// nothing, so they never reach this list. They show as a red tile in Live while
+// the exam runs, and that is the only sign there is.
 async function paintAlerts(sessions) {
   const ended = sessions.filter((s) => s.status === "ended");
   const events = await loadExitEvents(ended.map((s) => s.id));
@@ -1312,18 +1461,12 @@ async function paintAlerts(sessions) {
       alerts.push({ session, what: verdict.label, when: session.ended_at });
     }
   }
-  for (const session of sessions) {
-    if (!["approved", "active"].includes(session.status)) continue;
-    const since = session.heartbeat_at
-      ? Date.now() - new Date(session.heartbeat_at).getTime() : Infinity;
-    if (since > GONE_MS && session.status === "active") {
-      alerts.push({ session, what: "stopped checking in while the exam was running",
-                    when: session.heartbeat_at });
-    }
-  }
 
   $("alertCount").textContent = alerts.length;
   $("alerts").hidden = alerts.length === 0;
+  $("alertsHint").textContent = alerts.length
+    ? "Each of these ended without this exam's exit code being entered."
+    : "";
   const list = $("alertList");
   list.innerHTML = "";
   for (const alert of alerts) {
@@ -1567,6 +1710,15 @@ async function endSession(sessionId) {
       method: "PATCH", headers: { Prefer: "return=minimal" },
       body: { status: "ended", ended_at: new Date().toISOString() },
     });
+    // Say so, so this does not come back as "ended without the exit code". You
+    // ending a session is the one ending that needs no explanation.
+    try {
+      await call("/rest/v1/events", {
+        method: "POST", headers: { Prefer: "return=minimal" },
+        body: { session_id: sessionId, kind: "exit.proctor",
+                detail: `ended from the dashboard by ${me.full_name || me.campus_id || "a proctor"}` },
+      });
+    } catch (error) { /* the ending matters more than the note about it */ }
     closeDetail();
     toast("Session marked ended.");
     refresh();

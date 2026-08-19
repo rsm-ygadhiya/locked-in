@@ -98,6 +98,26 @@ alter table public.exams add column if not exists live_tiles    boolean not null
 -- same.
 alter table public.exams add column if not exists snapshot_interval integer not null default 60;
 
+-- Archived: over, but kept. The exam and everything it owns — sessions, photos,
+-- kept frames, the timeline — stay exactly where they are until somebody deletes
+-- it, which is what you want between the last student leaving and the grades being
+-- final.
+--
+-- What archiving releases is the join code. Codes are short and human, so the same
+-- one comes round again — MID24 next quarter, or the same quiz code every week —
+-- and a UNIQUE column would make the old exam block the new one forever. The
+-- partial index below is the whole trick: unique among exams that are still live,
+-- silent about the ones that are done.
+alter table public.exams add column if not exists archived_at timestamptz;
+
+-- The column-level UNIQUE has to go for the partial index to mean anything. Named
+-- by Postgres when the table was created, so drop it by that name and only if it
+-- is still there.
+alter table public.exams drop constraint if exists exams_join_code_key;
+
+create unique index if not exists exams_live_join_code_idx
+    on public.exams (join_code) where archived_at is null;
+
 
 -- ---------------------------------------------------------------------------
 -- exam_secrets
@@ -660,7 +680,7 @@ create policy profiles_update_self on public.profiles
 -- Any signed-in user can read open exams, which is how a student resolves a
 -- join code into an exam. Closed exams disappear from view.
 create policy exams_read_open on public.exams
-    for select using (is_open or faculty_id = auth.uid());
+    for select using ((is_open and archived_at is null) or faculty_id = auth.uid());
 
 create policy exams_owner_all on public.exams
     for all using (faculty_id = auth.uid() and public.is_faculty())
