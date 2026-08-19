@@ -39,7 +39,7 @@ erroring.
 
 If you want to satisfy yourself that the access rules hold before trusting them with
 a class, `test/run_tests.sh` runs the schema against a local Postgres and then tries
-nine ways to break it — self-approval, reading another student's session, uploading
+eleven ways to break it — self-approval, reading another student's session, uploading
 into someone else's folder, forging the proctor's decision:
 
 ```bash

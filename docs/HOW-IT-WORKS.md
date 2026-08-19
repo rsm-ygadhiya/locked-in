@@ -288,9 +288,10 @@ Supabase on its own, so students can be anywhere.
 **Verifying the access rules.** The claim the whole design rests on is that a student
 with full control of their laptop, holding the anon key that ships inside the app,
 still cannot admit themselves or see anyone else's data. `server/tests/run_tests.sh`
-applies `schema.sql` to a throwaway local Postgres and then tries nine ways to break
+applies `schema.sql` to a throwaway local Postgres and then tries eleven ways to break
 it — self-approval, inserting a pre-approved session, self-promotion to faculty,
 forging the proctor's decision fields, reading another student's session, uploading
 into someone else's storage folder, walking a session backwards, and heartbeating
-after a refusal. All nine are blocked; run it yourself before trusting it with a
+after a refusal, and deleting a frame kept of you. All eleven are blocked; run it
+yourself before trusting it with a
 class.

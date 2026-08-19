@@ -946,8 +946,13 @@ async function deleteSessionFiles(sessionId) {
   // The four a session always owns, plus however many frames were kept. The kept
   // ones have to be read out of the table first: once the session row goes, the
   // snapshot rows cascade with it and nothing can name those files again.
-  const kept = await call(
-    `/rest/v1/snapshots?select=storage_path&session_id=eq.${sessionId}`) || [];
+  let kept = [];
+  try {
+    kept = await call(
+      `/rest/v1/snapshots?select=storage_path&session_id=eq.${sessionId}`) || [];
+  } catch (error) {
+    kept = [];   // no snapshots table on this project, so there are none to delete
+  }
   const targets = [
     ["identity", "id.jpg"], ["identity", "selfie.jpg"],
     ["live", "screen.jpg"], ["live", "camera.jpg"],
@@ -1105,7 +1110,9 @@ async function paintFinished(sessions) {
       <div class="meta">
         <div class="name">${escapeHtml(nameOf(session))}</div>
         <div class="sub">finished ${ago(session.ended_at)} · ${lasted(session)}</div>
-        <div class="sub">${kept} kept frame${kept === 1 ? "" : "s"}</div>
+        <div class="sub">${keptFramesReadable
+          ? `${kept} kept frame${kept === 1 ? "" : "s"}`
+          : "kept frames unavailable"}</div>
       </div>
       <div class="acts">
         <button class="small ghost" onclick="openDetail('${session.id}')">Review</button>
@@ -1126,15 +1133,27 @@ function lasted(session) {
 
 // One count query for the whole list rather than one per student. PostgREST
 // returns the rows; counting them here beats N round trips for a number.
+let keptFramesReadable = true;
+
 async function snapshotCounts(sessionIds) {
   if (!sessionIds.length) return {};
   const list = `(${sessionIds.join(",")})`;
-  const rows = await call(
-    `/rest/v1/snapshots?select=session_id&session_id=in.${encodeURIComponent(list)}`)
-    || [];
-  const counts = {};
-  for (const row of rows) { counts[row.session_id] = (counts[row.session_id] || 0) + 1; }
-  return counts;
+  try {
+    const rows = await call(
+      `/rest/v1/snapshots?select=session_id&session_id=in.${encodeURIComponent(list)}`)
+      || [];
+    keptFramesReadable = true;
+    const counts = {};
+    for (const row of rows) { counts[row.session_id] = (counts[row.session_id] || 0) + 1; }
+    return counts;
+  } catch (error) {
+    // A project that has not re-run schema.sql has no snapshots table. Letting
+    // that throw took the whole refresh with it — no queue, no grid, no finished
+    // list — over a feature that is only ever a bonus.
+    keptFramesReadable = false;
+    console.warn("kept frames unavailable:", error.message);
+    return {};
+  }
 }
 
 // The kept frames for one student, newest first. Capped: a two-hour exam at one a
@@ -1143,11 +1162,21 @@ async function snapshotCounts(sessionIds) {
 const STRIP_MAX = 40;
 
 async function loadSnapshots(sessionId) {
-  return await call(`/rest/v1/snapshots?select=*&session_id=eq.${sessionId}` +
-                    `&order=captured_at.desc`) || [];
+  try {
+    return await call(`/rest/v1/snapshots?select=*&session_id=eq.${sessionId}` +
+                      `&order=captured_at.desc`) || [];
+  } catch (error) {
+    keptFramesReadable = false;
+    return [];
+  }
 }
 
 async function stripHtml(rows, kind) {
+  if (!keptFramesReadable) {
+    return `<p class="empty">Kept frames are switched off on this project — its
+      database has no <code>snapshots</code> table yet. Run
+      <code>server/schema.sql</code> on it again.</p>`;
+  }
   const mine = rows.filter((r) => r.kind === kind);
   if (!mine.length) return `<p class="empty">No kept ${kind} frames.</p>`;
   const shown = mine.slice(0, STRIP_MAX);

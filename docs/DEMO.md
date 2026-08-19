@@ -127,7 +127,7 @@ brew install postgresql@16 && brew services start postgresql@16
 ./server/tests/run_tests.sh
 ```
 
-That applies the real schema to a throwaway local database and then tries nine
+That applies the real schema to a throwaway local database and then tries eleven
 documented attacks against it. It never touches the Supabase project. See
 [`server/tests/README.md`](../server/tests/README.md) for what each one proves.
 

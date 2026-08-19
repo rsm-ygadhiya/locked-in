@@ -65,14 +65,15 @@ echo "$OUTPUT"
 # Counting beats eyeballing the log: a policy that quietly stops rejecting is exactly
 # the kind of regression that still reads as success.
 #
-# The nine attacks are blocked in two different ways, and both have to be checked:
+# The eleven attacks are blocked in two different ways, and both have to be checked:
 #   * six are refused outright, and must raise an error   (1, 2, 3, 6, 7, 9)
-#   * three are allowed to run but must have no effect    (4, 5, 8) — a forged write
-#     that is silently discarded, and two reads that must come back empty
+#   * five are allowed to run but must have no effect     (4, 5, 8, 10, 11) — a forged
+#     write that is silently discarded, reads that must come back empty, and a delete
+#     of somebody else's evidence that must remove nothing
 ATTACKS=$(grep -c "### ATTACK" <<<"$OUTPUT")
 ERRORS=$(grep -c "^psql:.*ERROR:\|^ERROR:" <<<"$OUTPUT")
 PASSES=$(grep -c "    PASS" <<<"$OUTPUT")
-SILENT_ATTACKS=3
+SILENT_ATTACKS=5
 EXPECTED_ERRORS=$((ATTACKS - SILENT_ATTACKS))
 
 printf '\n----------------------------------------\n'
@@ -80,21 +81,27 @@ printf 'attacks attempted:  %s\n' "$ATTACKS"
 printf 'refused with error: %s (expected %s)\n' "$ERRORS" "$EXPECTED_ERRORS"
 printf 'allowed actions:    %s\n' "$PASSES"
 
-[[ "$ATTACKS" -eq 9 ]] \
-	|| fail "expected 9 attacks in rls_test.sql, found $ATTACKS — the counts below assume 9"
+[[ "$ATTACKS" -eq 11 ]] \
+	|| fail "expected 11 attacks in rls_test.sql, found $ATTACKS — the counts below assume 11"
 [[ "$ERRORS" -eq "$EXPECTED_ERRORS" ]] \
 	|| fail "expected $EXPECTED_ERRORS refusals, saw $ERRORS — an attack got through, or a legitimate action broke"
-[[ "$PASSES" -eq 4 ]] \
-	|| fail "expected 4 legitimate actions to succeed, saw $PASSES"
+[[ "$PASSES" -eq 5 ]] \
+	|| fail "expected 5 legitimate actions to succeed, saw $PASSES"
 
 # The three that are checked by their result rather than by an error.
 grep -q "^null|null$" <<<"$OUTPUT" \
 	|| fail "ATTACK 4: a student wrote the proctor's decision fields"
 grep -q "^approved|t|t$" <<<"$OUTPUT" \
 	|| fail "faculty approval did not stamp decided_by and decided_at"
-# ATTACK 5 prints one 0; ATTACK 8 prints two. Fewer than three means something leaked.
-[[ "$(grep -c '^0$' <<<"$OUTPUT")" -eq 3 ]] \
-	|| fail "ATTACK 5/8: another student could see sessions, frames or storage objects"
+# ATTACK 5 prints one 0, ATTACK 8 two, ATTACK 10 one. Fewer than four means something
+# leaked. ATTACK 11 is checked separately, by what survived it.
+[[ "$(grep -c '^0$' <<<"$OUTPUT")" -eq 4 ]] \
+	|| fail "ATTACK 5/8/10: another student could see sessions, frames, objects or kept frames"
+
+# The kept frame the student tried to delete has to still be there, and its proctor
+# has to be able to read it. Both are the same "1" printed after ATTACK 11.
+[[ "$(grep -c '^1$' <<<"$OUTPUT")" -ge 2 ]] \
+	|| fail "ATTACK 11: a student deleted a frame kept of them, or its proctor cannot read it"
 
 printf '\n\033[32mAll checks passed.\033[0m\n'
 [[ "$KEEP" == true ]] && printf 'Database %s kept. Drop it with: dropdb %s\n' "$DB" "$DB"

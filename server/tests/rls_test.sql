@@ -4,7 +4,7 @@
 -- The whole proctoring design rests on one claim: a student in full control of
 -- their own laptop, holding the anon key that ships inside the app, still cannot
 -- admit themselves to an exam or see anyone else's data. This file tries to break
--- that claim nine different ways and expects to fail every time.
+-- that claim eleven different ways and expects to fail every time.
 --
 -- Run it with run_tests.sh. Everything happens inside one transaction that is
 -- rolled back at the end, so it leaves no rows behind.
@@ -154,6 +154,35 @@ select count(*) as frames_visible  from public.live_frames;
 select count(*) as objects_visible from storage.objects;
 
 \echo ''
+\echo '### the student keeps a frame of their own session'
+set test.uid = '22222222-2222-2222-2222-222222222222';
+insert into public.snapshots (session_id, kind, storage_path)
+values ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'screen',
+        'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb/snap/1-screen.jpg');
+\echo '    PASS'
+
+\echo ''
+\echo '### ATTACK 10 — another student reads those kept frames (must be 0)'
+set test.uid = '33333333-3333-3333-3333-333333333333';
+select count(*) as snapshots_visible from public.snapshots;
+
+\echo ''
+\echo '### ATTACK 11 — the student deletes a frame kept of them'
+-- Kept frames are evidence about the person who is being watched, so the person
+-- being watched must not be able to remove one. There is no student delete policy,
+-- so this deletes nothing rather than raising — which is why it is checked by its
+-- result, not by an error.
+set test.uid = '22222222-2222-2222-2222-222222222222';
+delete from public.snapshots
+where session_id = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+select count(*) as snapshots_surviving from public.snapshots;
+
+\echo ''
+\echo '### the proctor of the exam can read them (expect 1)'
+set test.uid = '11111111-1111-1111-1111-111111111111';
+select count(*) as snapshots_visible from public.snapshots;
+
+\echo ''
 \echo '### a refusal is final until the proctor resets it'
 set test.uid = '11111111-1111-1111-1111-111111111111';
 update public.sessions set status = 'rejected', reject_reason = 'ID unreadable'
@@ -172,7 +201,7 @@ rollback;
 \echo ''
 \echo '============================================================'
 \echo ' Attacks 1, 2, 3, 6, 7 and 9 must each be followed by ERROR.'
-\echo ' Attacks 4, 5 and 8 are allowed to run and must have no'
+\echo ' Attacks 4, 5, 8, 10 and 11 are allowed to run and must have no'
 \echo ' effect: 4 prints "null|null", 5 and 8 print 0.'
 \echo ' Every PASS line must be present. run_tests.sh checks all'
 \echo ' of that rather than leaving it to the eye.'
