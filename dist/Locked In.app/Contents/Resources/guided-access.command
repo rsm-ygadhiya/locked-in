@@ -184,6 +184,7 @@ Reinstall Locked In, or clear the Supabase settings in the admin panel to run it
 	LIVE_SESSION_ID=""
 	LIVE_EXAM_ID=""
 	EXAM_URL=""
+	EXAM_SNAP_INTERVAL=""
 	if [[ -n "$PLAIN_PY" ]]; then
 		read -r LIVE_SESSION_ID LIVE_EXAM_ID EXAM_URL < <(
 			"$PLAIN_PY" -c '
@@ -193,6 +194,22 @@ with open(sys.argv[1], encoding="utf-8") as handle:
 print(data.get("session_id", ""), data.get("exam_id", ""), data.get("allowed_url", ""))
 ' "$HANDOFF" 2>/dev/null
 		)
+		# What this exam records. The exam decides, not this machine's settings —
+		# the person who set the exam up is the one who chose whether a webcam is
+		# filmed, and they are not standing at this laptop.
+		read -r RECORD_SCREEN RECORD_CAMERA RECORD_AUDIO LIVE_TILES EXAM_SNAP_INTERVAL < <(
+			"$PLAIN_PY" -c '
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    data = json.load(handle)
+def flag(key):
+    return "true" if data.get(key, True) else "false"
+print(flag("record_screen"), flag("record_camera"), flag("record_audio"),
+      flag("live_tiles"), data.get("snapshot_interval", 60))
+' "$HANDOFF" 2>/dev/null
+		)
+		echo "This exam records: screen=$RECORD_SCREEN camera=$RECORD_CAMERA audio=$RECORD_AUDIO"
+		echo "Live tiles: $LIVE_TILES · kept frames every ${EXAM_SNAP_INTERVAL}s (0 = none)"
 	fi
 	if [[ -z "$LIVE_SESSION_ID" || -z "$EXAM_URL" ]]; then
 		echo "The approval file was unreadable. Not starting the exam."
@@ -252,7 +269,10 @@ agree, click Cancel — nothing is recorded and nothing on this Mac is changed."
 		[[ "$RECORD_AUDIO"  != true ]] && REC_FLAGS+=("--no-audio")
 		# In a proctored exam the recorder also keeps two small JPEGs current for
 		# uploader.py to publish to the proctor's dashboard.
-		[[ "$PROCTORED" == true ]] && REC_FLAGS+=("--live-tiles")
+		# Live tiles are what the proctor's grid shows. An exam can turn them off
+		# and still be proctored: the queue, the timeline and who is connected all
+		# keep working, there are simply no pictures.
+		[[ "$PROCTORED" == true && "${LIVE_TILES:-true}" == true ]] && REC_FLAGS+=("--live-tiles")
 		mkdir -p "$SESSION_DIR"
 		echo "Starting the recording (first run installs the Python packages, ~30s)..."
 		"${PY_RUNNER[@]}" "$RECORDER" --out-dir "$SESSION_DIR" "${REC_FLAGS[@]}" \
@@ -282,10 +302,17 @@ fi
 # this dies, the recording carries on and the dashboard simply shows the student as
 # stale.
 if [[ "$PROCTORED" == true && -n "$UPLOADER_PY" && -n "$REC_PID" ]]; then
+	UPLOAD_FLAGS=()
+	# The exam's own cadence for kept frames, and whether the grid gets pictures
+	# at all. Both come from the exam row; the machine's settings only decide when
+	# there is no exam.
+	[[ -n "$EXAM_SNAP_INTERVAL" ]] && UPLOAD_FLAGS+=("--snapshot-interval" "$EXAM_SNAP_INTERVAL")
+	[[ "${LIVE_TILES:-true}" != true ]] && UPLOAD_FLAGS+=("--no-tiles")
 	"${PY_RUNNER[@]}" "$UPLOADER_PY" \
 		--session-dir "$SESSION_DIR" \
 		--session-id "$LIVE_SESSION_ID" \
 		--token-file "$SESSION_DIR/token.json" \
+		"${UPLOAD_FLAGS[@]}" \
 		>"$SESSION_DIR/uploader.log" 2>&1 &
 	UPLOAD_PID=$!
 	sleep 1

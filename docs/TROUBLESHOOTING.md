@@ -247,6 +247,15 @@ exam it could *read*, and open exams are readable by anyone signed in, so other
 proctors' exams showed up in the picker — and then Delete, Close the door and Exit code
 all failed against them, because those are owner-only. It now lists only your own.
 
+**The recording chips do nothing, or a new exam says its database is too old.** Those
+five columns arrived after `snapshots` did, so a project migrated once still needs
+`server/schema.sql` run again. Everything keeps working meanwhile — the exam is created
+without them and each machine falls back to its own settings.
+
+**An exit code shows "set earlier".** That exam's code was set before codes could be
+read back, so only its hash exists. It still works; it cannot be shown. **Set a new
+one** and it becomes readable.
+
 **The exit code says "set, not readable".** That project's database predates readable
 exit codes. Re-run `server/schema.sql` on it; it is idempotent, adds the column, and
 does not touch existing exams. Until then you can set a new code but not look up the

@@ -89,6 +89,7 @@ And in proctored mode:
 | **Students can't self-admit** | Enforced by a database trigger, not by the app asking nicely |
 | **Per-exam exit code** | A code only proctors know ends the lockdown; checked server-side, so it never reaches the student's machine — and you can look it up again behind **Show code** |
 | **Exams you can manage** | Add and delete exams from the dashboard, with both codes on the row and only your own exams listed |
+| **Recording is per exam** | Screen, webcam, microphone, live tiles and how often a frame is kept are set on the exam — not on each machine — so the exam decides what it films |
 | **Proctors add proctors** | From the dashboard; a student cannot promote themselves |
 | **Kept frames** | A snapshot every minute is stored and survives the exam, so there is something to review afterwards rather than only a live grid |
 | **Finished list** | Students who ended, with how long they sat, their photos and their kept frames |

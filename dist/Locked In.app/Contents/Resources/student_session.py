@@ -833,6 +833,14 @@ class CheckIn(tk.Tk):
             "exam_id": self.exam["id"],
             "exam_title": self.exam["title"],
             "allowed_url": self.exam["allowed_url"],
+            # What this exam records, decided by whoever set the exam up rather
+            # than by this machine's settings file. Defaults match the columns,
+            # so an exam row written before these existed still behaves.
+            "record_screen": bool(self.exam.get("record_screen", True)),
+            "record_camera": bool(self.exam.get("record_camera", True)),
+            "record_audio": bool(self.exam.get("record_audio", True)),
+            "live_tiles": bool(self.exam.get("live_tiles", True)),
+            "snapshot_interval": self.exam.get("snapshot_interval", 60),
             "student": session.full_name or session.email,
             "token_file": str(token_file),
             "approved_at": now_iso(),

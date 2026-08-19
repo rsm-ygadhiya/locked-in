@@ -106,12 +106,16 @@ class Tile:
 
 
 def run(cloud: lockedin_cloud.Cloud, session_id: str, session_dir: Path,
-        interval: float, snapshot_interval: float = 0.0) -> int:
+        interval: float, snapshot_interval: float = 0.0,
+        publish_tiles: bool = True) -> int:
     live = session_dir / "live"
     tiles = [Tile(live / "screen.jpg", "screen"), Tile(live / "camera.jpg", "camera")]
     stop_file = session_dir / "STOP"
 
-    log(f"publishing every {interval:g}s for session {session_id}")
+    if publish_tiles:
+        log(f"publishing every {interval:g}s for session {session_id}")
+    else:
+        log(f"images off for this exam; heartbeats only for session {session_id}")
     if snapshot_interval > 0:
         log(f"keeping a frame every {snapshot_interval:g}s")
     # approved -> active, so the proctor's grid distinguishes a student who has been
@@ -139,7 +143,7 @@ def run(cloud: lockedin_cloud.Cloud, session_id: str, session_dir: Path,
             next_tick = now + interval
             for tile in tiles:
                 data = tile.fresh_bytes()
-                if data is None:
+                if data is None or not publish_tiles:
                     continue
                 try:
                     cloud.put_frame(session_id, tile.kind, data)
@@ -218,6 +222,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--snapshot-interval", type=float, default=None,
                        help="seconds between kept frames; 0 keeps none "
                             "(default: from the config)")
+    parser.add_argument("--no-tiles", action="store_true",
+                       help="publish no images at all — heartbeats, events and the "
+                            "final status only. An exam that does not want its "
+                            "students' screens on a grid still wants the proctor to "
+                            "see who is connected.")
     args = parser.parse_args(argv)
 
     for sig in (signal.SIGINT, signal.SIGTERM):
@@ -257,7 +266,8 @@ def main(argv: list[str] | None = None) -> int:
         log("ERROR: the token file held no access token")
         return 2
 
-    return run(cloud, args.session_id, session_dir, interval, snapshot_interval)
+    return run(cloud, args.session_id, session_dir, interval, snapshot_interval,
+               publish_tiles=not args.no_tiles)
 
 
 if __name__ == "__main__":

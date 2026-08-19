@@ -190,6 +190,17 @@ if ($LASTEXITCODE -eq 0) {
     $handoff = Get-Content $handoffPath -Raw | ConvertFrom-Json
     $LiveSession = [string]$handoff.session_id
     $LiveExam    = [string]$handoff.exam_id
+
+    # What this exam records. Set where the exam was set, which is not this PC —
+    # so it overrides whatever the local settings file says. Missing means an exam
+    # row written before these existed: record everything, as before.
+    function Handoff-Flag($value) { if ($null -eq $value) { return $true } return [bool]$value }
+    $RecordScreen = Handoff-Flag $handoff.record_screen
+    $RecordCamera = Handoff-Flag $handoff.record_camera
+    $RecordAudio  = Handoff-Flag $handoff.record_audio
+    $LiveTiles    = Handoff-Flag $handoff.live_tiles
+    $SnapEvery    = if ($null -eq $handoff.snapshot_interval) { 60 }
+                    else { [int]$handoff.snapshot_interval }
     if (-not $LiveSession -or -not $handoff.allowed_url) {
         [System.Windows.Forms.MessageBox]::Show(
             "The approval file was unreadable. Not starting the exam.",
@@ -286,13 +297,21 @@ function Start-Recording {
     }
 
     New-Item -ItemType Directory -Path $SessionDir -Force | Out-Null
+    # In a proctored exam the exam's own choices win over this machine's settings:
+    # the person who decided whether a webcam is filmed set the exam up, and is not
+    # standing at this laptop.
+    $useScreen = if ($Proctored -and $null -ne $RecordScreen) { $RecordScreen } else { $RecScreen }
+    $useCamera = if ($Proctored -and $null -ne $RecordCamera) { $RecordCamera } else { $RecCamera }
+    $useAudio  = if ($Proctored -and $null -ne $RecordAudio)  { $RecordAudio }  else { $RecAudio }
+
     $recArgs = @($RecorderPy, "--out-dir", $SessionDir)
-    if (-not $RecScreen) { $recArgs += "--no-screen" }
-    if (-not $RecCamera) { $recArgs += "--no-camera" }
-    if (-not $RecAudio)  { $recArgs += "--no-audio" }
+    if (-not $useScreen) { $recArgs += "--no-screen" }
+    if (-not $useCamera) { $recArgs += "--no-camera" }
+    if (-not $useAudio)  { $recArgs += "--no-audio" }
     # In a proctored exam the recorder also keeps two small JPEGs current for
-    # uploader.py to publish to the proctor's dashboard.
-    if ($Proctored)      { $recArgs += "--live-tiles" }
+    # uploader.py to publish to the proctor's dashboard — unless the exam turned
+    # the live grid off, in which case there is nothing to keep current.
+    if ($Proctored -and $LiveTiles) { $recArgs += "--live-tiles" }
 
     $script:RecProc = Start-Process -FilePath $PyExe `
         -ArgumentList (Quote-Args ($PyArgs + $recArgs)) `
@@ -338,6 +357,8 @@ function Start-Uploading {
     $upArgs = @($UploaderPy, "--session-dir", $SessionDir,
                 "--session-id", $LiveSession,
                 "--token-file", (Join-Path $SessionDir "token.json"))
+    if ($null -ne $SnapEvery) { $upArgs += @("--snapshot-interval", "$SnapEvery") }
+    if (-not $LiveTiles)      { $upArgs += "--no-tiles" }
     $script:UploadProc = Start-Process -FilePath $PyExe `
         -ArgumentList (Quote-Args ($PyArgs + $upArgs)) `
         -PassThru -WindowStyle Hidden `

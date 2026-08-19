@@ -75,6 +75,29 @@ create table if not exists public.exams (
 
 create index if not exists exams_faculty_idx on public.exams (faculty_id);
 
+-- What this exam records, and what it publishes. Added after the table existed,
+-- so they are alters: re-running this file must not drop anybody's exams.
+--
+-- These live on the exam rather than in each machine's settings file because the
+-- person who decides whether a webcam is filmed is the one setting the exam, not
+-- whoever last opened the settings panel on a lab machine. The exam wins; the
+-- local settings are what a standalone lockdown uses when there is no exam.
+--
+-- Students can read open exams, so a student can see these. That is intended:
+-- their own machine has to know what to record, and being able to read "this
+-- exam films your webcam" off the row is not a leak — it is the notice they are
+-- shown anyway before anything starts.
+alter table public.exams add column if not exists record_screen boolean not null default true;
+alter table public.exams add column if not exists record_camera boolean not null default true;
+alter table public.exams add column if not exists record_audio  boolean not null default true;
+-- Whether the live grid gets thumbnails at all. Off means the proctor sees who is
+-- connected and their event timeline, and no pictures.
+alter table public.exams add column if not exists live_tiles    boolean not null default true;
+-- Seconds between kept frames, 0 for none. This is the one that spends storage,
+-- so it is per exam: a two-hour final and a ten-minute quiz should not cost the
+-- same.
+alter table public.exams add column if not exists snapshot_interval integer not null default 60;
+
 
 -- ---------------------------------------------------------------------------
 -- exam_secrets

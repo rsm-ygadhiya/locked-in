@@ -219,6 +219,14 @@ Clearing them returns the machine to standalone mode.
    and an **exit code**.
 3. Read the **join code** out to the room. Keep the **exit code** to yourself.
 
+Each exam also carries what it records — **Screen**, **Webcam**, **Microphone**,
+**Live tiles**, and how often a frame is kept. Those are the exam's, not the machine's:
+a student sitting this exam records what you chose here whatever their own settings
+say, and changing a chip applies to the next student who checks in. Turning **Live
+tiles** off keeps the approval queue, the timeline and the heartbeat, and shows no
+pictures — which is the setting for an exam where a grid of faces is more than you
+need.
+
 **Your exams** lists everything you own, with both codes on the row: **Show code**
 reveals the exit code, **Change** sets a new one, **Watch** points the live grid at
 that exam, and **Delete** removes it along with every photo and kept frame. Only your

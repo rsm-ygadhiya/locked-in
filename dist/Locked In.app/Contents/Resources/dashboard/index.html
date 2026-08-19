@@ -165,6 +165,17 @@
                font-size: 17px; letter-spacing: .08em; }
   .code .val.hidden-code { color: var(--muted); }
   .exam .acts { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+  .exam .rec { display: flex; gap: 6px; flex-wrap: wrap; flex: 1 1 100%; order: 9;
+               padding-left: 2px; }
+  .chip { background: transparent; border: 1px solid var(--line); border-radius: 999px;
+          padding: 3px 11px; font-size: 12px; color: var(--muted); cursor: pointer;
+          width: auto; }
+  .chip:hover { border-color: var(--accent); }
+  .tick { display: flex; align-items: center; gap: 7px; font-size: 13px;
+          color: var(--fg); cursor: pointer; }
+  .tick input { width: auto; margin: 0; }
+  .chip.on { color: var(--accent); border-color: rgba(34,197,94,.45); }
+
   .pill { border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px;
           font-size: 11px; color: var(--muted); }
   .pill.open { color: var(--accent); border-color: var(--accent); }
@@ -293,6 +304,24 @@
           <input id="examExit" class="mono" placeholder="at least 4 characters"
                  autocapitalize="none" autocorrect="off" spellcheck="false"></label>
       </div>
+      <div class="row" style="gap:18px;flex-wrap:wrap">
+        <label class="tick"><input type="checkbox" id="examRecScreen" checked>
+          Record the screen</label>
+        <label class="tick"><input type="checkbox" id="examRecCamera" checked>
+          Record the webcam</label>
+        <label class="tick"><input type="checkbox" id="examRecAudio" checked>
+          Record the microphone</label>
+        <label class="tick"><input type="checkbox" id="examLiveTiles" checked>
+          Live tiles on the grid</label>
+        <label class="field" style="flex:0 0 190px">
+          <span>Keep a frame every (seconds, 0 for none)</span>
+          <input id="examKeepEvery" class="mono" value="60" inputmode="numeric"></label>
+      </div>
+      <p style="color:var(--muted);font-size:13px;margin-bottom:12px">
+        Those four are the exam's, not the machine's: whoever sits this exam records
+        what you chose here, whatever their own settings say. You can change them
+        afterwards from the exam's row.
+      </p>
       <p style="color:var(--muted);font-size:13px;margin-bottom:12px">
         The exit code is what you type on a student's machine to end their lockdown.
         It never reaches their computer — the check happens on the server — so nobody
@@ -624,7 +653,10 @@ async function loadExitCodes() {
   try {
     const rows = await call("/rest/v1/exam_secrets?select=exam_id,exit_code" +
                             `&exam_id=in.${encodeURIComponent(ids)}`) || [];
-    for (const row of rows) { exitCodes[row.exam_id] = row.exit_code || ""; }
+    // null, not "": a row with no exit_code is an exam whose code was set before
+    // codes were readable. It has one, it works, and it cannot be shown — which is
+    // a different thing to say than "not set".
+    for (const row of rows) { exitCodes[row.exam_id] = row.exit_code ?? null; }
   } catch (error) {
     // A project whose schema.sql predates readable exit codes has no exit_code
     // column, and asking for it is a 400. That must not take the whole dashboard
@@ -654,8 +686,10 @@ function paintExams() {
     // nothing to reveal — say which rather than showing empty dots.
     const exitCell = !codesReadable
       ? `<span class="val hidden-code" title="Run server/schema.sql on this project again">set, not readable</span>`
-      : code === undefined || code === ""
+      : code === undefined
       ? `<span class="val hidden-code">not set</span>`
+      : code === null || code === ""
+      ? `<span class="val hidden-code" title="Set before exit codes could be read back">set earlier</span>`
       : `<span class="val${shown ? "" : " hidden-code"}">${
            shown ? escapeHtml(code) : "•".repeat(Math.max(4, code.length))}</span>`;
 
@@ -676,17 +710,99 @@ function paintExams() {
       </div>
       <span class="pill${exam.is_open ? " open" : ""}">${
         exam.is_open ? "open" : "closed"}</span>
+      <div class="rec">
+        ${recChip(exam, "record_screen", "Screen")}
+        ${recChip(exam, "record_camera", "Webcam")}
+        ${recChip(exam, "record_audio", "Microphone")}
+        ${recChip(exam, "live_tiles", "Live tiles")}
+        <button class="chip" onclick="setKeepEvery('${exam.id}')"
+          title="Seconds between frames kept for review. 0 keeps none.">
+          Keep a frame: ${Number(exam.snapshot_interval) > 0
+            ? `every ${exam.snapshot_interval}s` : "off"}</button>
+      </div>
       <div class="acts">
-        ${codesReadable && code !== undefined && code !== ""
+        ${codesReadable && code
           ? `<button class="small ghost" onclick="toggleCode('${exam.id}')">${
                shown ? "Hide code" : "Show code"}</button>
              <button class="small ghost" onclick="changeExitCode('${exam.id}')">Change</button>`
           : `<button class="small ghost" onclick="changeExitCode('${exam.id}')">${
-               codesReadable ? "Set exit code" : "Set a new one"}</button>`}
+               code === undefined ? "Set exit code" : "Set a new one"}</button>`}
         <button class="small ghost" onclick="selectExam('${exam.id}')">Watch</button>
         <button class="small bad" onclick="deleteExam('${exam.id}')">Delete</button>
       </div>`;
     list.appendChild(row);
+  }
+}
+
+// One chip per thing this exam records. Clicking it writes the exam row, so the
+// next student to check in gets the new answer — the choice belongs to the exam,
+// not to whichever machine they sit at.
+// PostgREST says this two different ways depending on version, and the dashboard
+// has to recognise both to fall back rather than fail.
+function missingColumn(error) {
+  return /does not exist|PGRST204|schema cache/i.test(error.message || "");
+}
+
+function recChip(exam, column, label) {
+  const on = exam[column] !== false;
+  return `<button class="chip${on ? " on" : ""}"
+    onclick="toggleExamFlag('${exam.id}', '${column}')"
+    title="${on ? "Recording" : "Not recording"} — click to change">
+    ${on ? "●" : "○"} ${label}</button>`;
+}
+
+async function toggleExamFlag(examId, column) {
+  const exam = exams.find((e) => e.id === examId);
+  if (!exam) return;
+  const next = exam[column] === false;   // undefined counts as on
+  try {
+    await call(`/rest/v1/exams?id=eq.${examId}`, {
+      method: "PATCH", headers: { Prefer: "return=minimal" },
+      body: { [column]: next },
+    });
+    exam[column] = next;
+    paintExams();
+    toast(next ? "On for this exam. It applies to the next student who checks in."
+               : "Off for this exam. Students already running are unaffected.");
+  } catch (error) {
+    toast(missingColumn(error)
+      ? "This project's database has no per-exam recording settings yet. Run "
+        + "server/schema.sql on it again — it adds the columns without touching "
+        + "your exams."
+      : "Could not change it: " + error.message, true);
+  }
+}
+
+async function setKeepEvery(examId) {
+  const exam = exams.find((e) => e.id === examId);
+  if (!exam) return;
+  const answer = prompt(
+    `Keep a frame every how many seconds, for "${exam.title}"?\n\n` +
+    "Kept frames are what you review after the exam. They are never overwritten " +
+    "and live until you delete the exam, so this is the setting that spends your " +
+    "storage: forty students for two hours at one a minute is about 500 MB.\n\n" +
+    "0 keeps none.", String(exam.snapshot_interval ?? 60));
+  if (answer === null) return;
+  const seconds = Math.max(0, Math.round(Number(answer)));
+  if (!Number.isFinite(seconds)) return toast("That is not a number of seconds.", true);
+  if (seconds > 0 && seconds < 5) {
+    return toast("Five seconds is the floor — anything faster fills the free tier "
+                 + "in one exam.", true);
+  }
+  try {
+    await call(`/rest/v1/exams?id=eq.${examId}`, {
+      method: "PATCH", headers: { Prefer: "return=minimal" },
+      body: { snapshot_interval: seconds },
+    });
+    exam.snapshot_interval = seconds;
+    paintExams();
+    toast(seconds ? `Keeping a frame every ${seconds}s.` : "Keeping no frames.");
+  } catch (error) {
+    toast(missingColumn(error)
+      ? "This project's database has no per-exam kept-frame settings yet. Run "
+        + "server/schema.sql on it again — it adds the columns without touching "
+        + "your exams."
+      : "Could not change it: " + error.message, true);
   }
 }
 
@@ -728,16 +844,45 @@ async function createExam() {
   if (!title || !url || !code) return toast("Title, site and join code are all needed.", true);
   if (!/^https?:\/\//i.test(url)) return toast("The allowed site must start with http:// or https://", true);
   if (exit && exit.length < 4) return toast("An exit code needs at least 4 characters.", true);
+  const keepEvery = Math.max(0, Math.round(Number($("examKeepEvery").value || 0)));
+  if (!Number.isFinite(keepEvery)) return toast("Keep a frame every — that is not a number.", true);
+  if (keepEvery > 0 && keepEvery < 5) {
+    return toast("Five seconds is the floor for kept frames — anything faster fills "
+                 + "the free tier in one exam.", true);
+  }
   if (exit && exit.toUpperCase() === code) {
     return toast("The exit code must not be the same as the join code — the whole "
                  + "room knows the join code.", true);
   }
+  const base = { faculty_id: me.id, title, allowed_url: url, join_code: code,
+                 is_open: true };
+  const withRecording = {
+    ...base,
+    record_screen: $("examRecScreen").checked,
+    record_camera: $("examRecCamera").checked,
+    record_audio: $("examRecAudio").checked,
+    live_tiles: $("examLiveTiles").checked,
+    snapshot_interval: keepEvery,
+  };
   try {
-    const rows = await call("/rest/v1/exams", {
-      method: "POST",
-      headers: { Prefer: "return=representation" },
-      body: { faculty_id: me.id, title, allowed_url: url, join_code: code, is_open: true },
-    });
+    let rows;
+    try {
+      rows = await call("/rest/v1/exams", {
+        method: "POST", headers: { Prefer: "return=representation" },
+        body: withRecording,
+      });
+    } catch (error) {
+      // A project whose schema.sql predates per-exam recording has none of those
+      // columns. Refusing to create the exam over settings that have defaults
+      // would be the tail wagging the dog.
+      if (!missingColumn(error)) throw error;
+      rows = await call("/rest/v1/exams", {
+        method: "POST", headers: { Prefer: "return=representation" }, body: base,
+      });
+      toast("Created — but this project's database predates per-exam recording "
+            + "settings, so it will use each machine's own. Run server/schema.sql "
+            + "on it again.", true);
+    }
     currentExam = rows[0];
     if (exit) { await setExitCode(currentExam.id, exit); }
     $("newExam").hidden = true;
