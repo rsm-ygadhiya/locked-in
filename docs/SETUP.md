@@ -268,6 +268,12 @@ leave a student trapped in a locked browser behind a code that does not exist.
 
 **Proctor**, during:
 
+- **Needs a look** appears at the top the moment a session ends without the exam's
+  exit code being typed, or a running one stops checking in. Both are the shapes a
+  student leaving early makes: quitting the lockdown, force-quitting it, closing the
+  lid, pulling the plug. Each row says which, and desktop notifications fire too if
+  you allow them, so you can watch the room instead of the screen.
+
 - The approval queue shows each student's ID photo beside their check-in photo, with
   the name on their account. Approve or refuse; a refusal reason is shown to the
   student in their own words.

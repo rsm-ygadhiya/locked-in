@@ -398,8 +398,33 @@ remove_policy() {
 	sudo killall cfprefsd 2>/dev/null
 }
 
+# How this session ended, in the proctor's timeline. Runs before the token is
+# scrubbed, because it needs it.
+#
+# The absence of a marker file is itself the answer: nothing wrote one, so nobody
+# typed a code that was accepted — Ctrl+C, a signal, a crash. A hard kill of this
+# script writes nothing at all and reaches nothing, which is why the dashboard also
+# watches for sessions that simply stop checking in.
+log_exit_kind() {
+	[[ "$PROCTORED" != true || -z "$LIVE_SESSION_ID" || -z "$CLOUD_PY" ]] && return
+	[[ -f "$SESSION_DIR/token.json" ]] || return
+	local kind="exit.signal"
+	local detail="ended without a verified exit code"
+	if [[ -f "$SESSION_DIR/exit-kind" ]]; then
+		kind="$(cat "$SESSION_DIR/exit-kind" 2>/dev/null)"
+		case "$kind" in
+			exit.code)     detail="the exam's own exit code was accepted" ;;
+			exit.passcode) detail="this machine's local passcode was used" ;;
+			*)             kind="exit.signal" ;;
+		esac
+	fi
+	"${PY_RUNNER[@]}" "$CLOUD_PY" log-event "$LIVE_SESSION_ID" \
+		"$SESSION_DIR/token.json" "$kind" "$detail" >/dev/null 2>&1 || true
+}
+
 # ALWAYS undo everything on exit, even on crash / Ctrl+C.
 cleanup() {
+	log_exit_kind
 	# Uploader first: it needs the live tiles to still exist to publish a last frame,
 	# and it is what marks the session ended for the proctor.
 	stop_uploading
@@ -438,7 +463,20 @@ sleep 1
 # down at the moment a proctor tries to release a machine, refusing would leave a
 # student locked in a browser with no way out — so an unreachable server falls
 # through to the machine's own passcode rather than failing closed.
-VERIFY_CMD="$(printf '%q ' "${PY_RUNNER[@]}" "$CONFIG_PY")verify-passcode"
+# Standalone: the only door is the machine's own passcode, and it still records
+# that it was used, so a session folder always says how it ended.
+STANDALONE_HELPER="$SESSION_DIR/verify-passcode.sh"
+{
+	echo '#!/bin/bash'
+	echo 'code="$(cat)"'
+	printf 'printf %%s "$code" | %s verify-passcode >/dev/null 2>&1\n' \
+		"$(printf '%q ' "${PY_RUNNER[@]}" "$CONFIG_PY")"
+	printf 'rc=$?\n'
+	printf '[[ $rc -eq 0 ]] && echo exit.passcode >%q\n' "$SESSION_DIR/exit-kind"
+	printf 'exit $rc\n'
+} >"$STANDALONE_HELPER"
+chmod +x "$STANDALONE_HELPER"
+VERIFY_CMD="$(printf '%q' "$STANDALONE_HELPER")"
 
 if [[ "$PROCTORED" == true && -n "$LIVE_EXAM_ID" && -n "$CLOUD_PY" ]]; then
 	EXIT_HELPER="$SESSION_DIR/verify-exit.sh"
@@ -457,7 +495,10 @@ if [[ "$PROCTORED" == true && -n "$LIVE_EXAM_ID" && -n "$CLOUD_PY" ]]; then
 			"$(printf '%q ' "${PY_RUNNER[@]}" "$CLOUD_PY")" \
 			"$LIVE_EXAM_ID" "$SESSION_DIR/token.json"
 		echo 'rc=$?'
-		echo '[[ $rc -eq 0 ]] && exit 0'
+		# Which door was used, for the proctor's timeline. The trustworthy record
+		# is exit_verified_at, which the server writes; this only explains it.
+		printf 'if [[ $rc -eq 0 ]]; then echo exit.code >%q; exit 0; fi\n' \
+			"$SESSION_DIR/exit-kind"
 		printf 'if [[ $rc -eq 1 ]]; then\n'
 		printf '\t%s has-exit-code %q %q >/dev/null 2>&1\n' \
 			"$(printf '%q ' "${PY_RUNNER[@]}" "$CLOUD_PY")" \
@@ -466,6 +507,9 @@ if [[ "$PROCTORED" == true && -n "$LIVE_EXAM_ID" && -n "$CLOUD_PY" ]]; then
 		printf 'fi\n'
 		printf 'printf %%s "$code" | %s verify-passcode >/dev/null 2>&1\n' \
 			"$(printf '%q ' "${PY_RUNNER[@]}" "$CONFIG_PY")"
+		printf 'rc=$?\n'
+		printf '[[ $rc -eq 0 ]] && echo exit.passcode >%q\n' "$SESSION_DIR/exit-kind"
+		printf 'exit $rc\n'
 	} >"$EXIT_HELPER"
 	chmod +x "$EXIT_HELPER"
 	VERIFY_CMD="$(printf '%q' "$EXIT_HELPER")"

@@ -185,6 +185,18 @@ typed, and the lockdown treated that as a wrong code rather than as "this exam h
 code", so the machine's own passcode was never tried and Force Quit was the only way
 out. The lockdown now asks whether the exam has a code before refusing.
 
+**"Ended without the exit code" on somebody who finished normally.** The stamp comes
+from the server when a correct exit code is verified, so it means exactly one thing:
+that exam's own code was not typed on that machine. The usual innocent explanation is
+the machine's local passcode being used instead — which the row says, when the student's
+app got far enough to report it. An exam with no exit code set has nowhere to get a
+stamp from, so every session on it ends this way.
+
+**A student shows as "stopped checking in" but was fine.** The heartbeat has been quiet
+for over 90 seconds. A closed lid, a dead wifi, a sleeping laptop and a force quit look
+identical from the server, which is why it says what it saw rather than what it thinks
+happened. It clears itself if the app comes back.
+
 ### Kept frames
 
 **The filmstrips are empty.** Three things to check in order: `snapshot_interval` is

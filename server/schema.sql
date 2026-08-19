@@ -183,6 +183,16 @@ create table if not exists public.sessions (
     unique (exam_id, student_id)
 );
 
+-- Stamped by verify_exit_code() when a correct exit code is typed, and by nothing
+-- else. This is the difference between "the proctor let them out" and "the session
+-- stopped" — and it has to be written by the server, because the interesting case
+-- is a student whose machine writes nothing at all: a force quit, a pulled plug, a
+-- killed uploader. A session that ends with this empty ended some other way.
+--
+-- Deliberately not writable by the student: the guard trigger below puts back
+-- whatever was there, so a student cannot stamp their own clean exit.
+alter table public.sessions add column if not exists exit_verified_at timestamptz;
+
 create index if not exists sessions_exam_status_idx on public.sessions (exam_id, status);
 create index if not exists sessions_student_idx     on public.sessions (student_id);
 
@@ -392,10 +402,13 @@ begin
         raise exception 'this session was rejected; ask the proctor to reset it';
     end if;
 
-    -- The decision fields are the proctor's record, not the student's.
-    new.decided_at    := old.decided_at;
-    new.decided_by    := old.decided_by;
-    new.reject_reason := old.reject_reason;
+    -- The decision fields are the proctor's record, not the student's. So is the
+    -- exit stamp: it exists to say whether a correct code was ever typed, and a
+    -- value the student can write says nothing at all.
+    new.decided_at       := old.decided_at;
+    new.decided_by       := old.decided_by;
+    new.reject_reason    := old.reject_reason;
+    new.exit_verified_at := old.exit_verified_at;
 
     return new;
 end;
@@ -516,7 +529,23 @@ begin
     if stored is null then
         return false;
     end if;
-    return stored = crypt(btrim(p_code), stored);
+
+    if stored = crypt(btrim(p_code), stored) then
+        -- Record that this exam's own code was accepted, for whoever typed it. A
+        -- proctor releasing a machine stamps the session they are standing at; a
+        -- student typing a code they should not have stamps their own. Either way
+        -- the row now says the session was ended on purpose, by someone holding
+        -- the code, at this moment.
+        update public.sessions s
+        set    exit_verified_at = now()
+        where  s.exam_id = p_exam
+          and  s.status in ('approved', 'active')
+          and  (s.student_id = auth.uid()
+                or exists (select 1 from public.exams e
+                           where e.id = p_exam and e.faculty_id = auth.uid()));
+        return true;
+    end if;
+    return false;
 end;
 $$;
 

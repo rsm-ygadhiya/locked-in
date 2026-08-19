@@ -183,6 +183,32 @@ set test.uid = '11111111-1111-1111-1111-111111111111';
 select count(*) as snapshots_visible from public.snapshots;
 
 \echo ''
+\echo '### the exam sets an exit code, and the student types it'
+set test.uid = '11111111-1111-1111-1111-111111111111';
+select public.set_exit_code('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'letmeout9') is null
+       as code_set;
+set test.uid = '22222222-2222-2222-2222-222222222222';
+update public.sessions set status = 'active'
+where id = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+select public.verify_exit_code('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'letmeout9')
+       as accepted;
+-- The stamp is the whole point: it is what tells a proctor this session ended on
+-- purpose rather than being force-quit.
+select exit_verified_at is not null as exit_was_verified
+from public.sessions where id = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+\echo '    PASS'
+
+\echo ''
+\echo '### ATTACK 12 — the student stamps their own clean exit (must stay as it was)'
+-- A wrong code leaves the stamp alone, and so does writing it by hand: a value the
+-- student controls would say nothing about how the session really ended.
+update public.sessions set exit_verified_at = now() + interval '1 hour'
+where id = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+select count(*) as forged_stamps from public.sessions
+where id = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
+  and exit_verified_at > now() + interval '1 minute';
+
+\echo ''
 \echo '### a refusal is final until the proctor resets it'
 set test.uid = '11111111-1111-1111-1111-111111111111';
 update public.sessions set status = 'rejected', reject_reason = 'ID unreadable'
@@ -201,7 +227,7 @@ rollback;
 \echo ''
 \echo '============================================================'
 \echo ' Attacks 1, 2, 3, 6, 7 and 9 must each be followed by ERROR.'
-\echo ' Attacks 4, 5, 8, 10 and 11 are allowed to run and must have no'
+\echo ' Attacks 4, 5, 8, 10, 11 and 12 are allowed to run and must have no'
 \echo ' effect: 4 prints "null|null", 5 and 8 print 0.'
 \echo ' Every PASS line must be present. run_tests.sh checks all'
 \echo ' of that rather than leaving it to the eye.'

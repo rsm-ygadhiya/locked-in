@@ -567,6 +567,39 @@ def main(argv: list[str]) -> int:
             print(f"cannot verify: {error}", file=sys.stderr)
             return 2
 
+    if command == "log-event":
+        # Used by the lockdown on the way out, to say how the session ended. The
+        # event is the explanation; sessions.exit_verified_at is the evidence, and
+        # only the server writes that one.
+        #
+        #     log-event <session-id> <token-file> <kind> [detail]
+        if len(argv) < 4:
+            print("usage: log-event <session-id> <token-file> <kind> [detail]",
+                  file=sys.stderr)
+            return 64
+        session_id, token_path, kind = argv[1], argv[2], argv[3]
+        detail = argv[4] if len(argv) > 4 else ""
+        try:
+            cloud = Cloud.from_config()
+            token = json.loads(Path(token_path).expanduser().read_text())
+        except (CloudError, OSError, ValueError) as error:
+            print(f"cannot log: {error}", file=sys.stderr)
+            return 2
+        cloud.session = Session(
+            user_id=token.get("user_id", ""),
+            access_token=token.get("access_token", ""),
+            refresh_token=token.get("refresh_token", ""),
+            expires_at=time.time() + 60,
+            email=token.get("email", ""),
+            role=token.get("role", "student"),
+        )
+        try:
+            cloud.log_event(session_id, kind, detail)
+            return 0
+        except CloudError as error:
+            print(f"cannot log: {error}", file=sys.stderr)
+            return 1
+
     if command == "has-exit-code":
         # Used by the lockdown to tell "wrong code" apart from "this exam never set
         # one". Both come back from verify-exit as a plain no, and treating the

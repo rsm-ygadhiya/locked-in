@@ -33,6 +33,7 @@ so that is tested too), and runs the attacks inside a transaction that is rolled
 | 9 | Heartbeat a session that was refused | the status trigger |
 | 10 | Read another student's kept frames | the snapshots select policy |
 | 11 | Delete a frame kept of you | no student delete policy — the delete removes nothing |
+| 12 | Stamp your own clean exit | the guard trigger puts `exit_verified_at` back |
 
 Six are refused outright with an error. Five — 4, 5, 8, 10 and 11 — are *allowed to
 run* and must have no effect, which is the more interesting failure mode: a forged write that is
@@ -46,6 +47,18 @@ that student publishing a frame and an event for their own session, and that stu
 uploading under their own session id. Plus the proctor's approval stamping
 `decided_by` and `decided_at`, and the signup trigger creating a profile row. A policy
 that blocks everything is not a passing test.
+
+## The other suite
+
+[`exit_paths.sh`](exit_paths.sh) walks every way a lockdown can end and checks what
+the proctor is told about each — the exam's code, the machine passcode, a wrong code,
+an offline server, and the ones that write nothing at all. It lifts the real helper
+generator out of `guided-access.command` rather than copying it, so a change there
+fails the test. No network, no project.
+
+```bash
+./server/tests/exit_paths.sh
+```
 
 **Reading the output.** Each `### ATTACK` line must be followed by an `ERROR`, except
 for 4, 5 and 8. A silent attack is a failing test, and the script fails loudly if the

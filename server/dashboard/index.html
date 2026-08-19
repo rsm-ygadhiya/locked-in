@@ -165,6 +165,16 @@
                font-size: 17px; letter-spacing: .08em; }
   .code .val.hidden-code { color: var(--muted); }
   .exam .acts { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+  .card.alert { border-color: rgba(248,113,113,.45); background: rgba(248,113,113,.06); }
+  .alertrow { display: flex; gap: 12px; align-items: center; padding: 9px 0;
+              border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  .alertrow:last-child { border-bottom: 0; }
+  .alertrow .what { color: var(--danger); font-weight: 600; }
+  .badge { border-radius: 999px; padding: 2px 9px; font-size: 11px;
+           border: 1px solid var(--line); color: var(--muted); }
+  .badge.good { color: var(--accent); border-color: rgba(34,197,94,.45); }
+  .badge.bad  { color: var(--danger); border-color: rgba(248,113,113,.5); }
+
   .exam .rec { display: flex; gap: 6px; flex-wrap: wrap; flex: 1 1 100%; order: 9;
                padding-left: 2px; }
   .chip { background: transparent; border: 1px solid var(--line); border-radius: 999px;
@@ -274,6 +284,14 @@
 
   <main>
     <div id="noProject" class="banner" hidden></div>
+
+    <section id="alerts" class="card alert" hidden>
+      <div class="row" style="align-items:baseline;margin-bottom:10px">
+        <h2 style="margin:0">Needs a look (<span id="alertCount">0</span>)</h2>
+        <span class="sub" style="margin-left:auto" id="notifyState"></span>
+      </div>
+      <div id="alertList"></div>
+    </section>
 
     <section id="examsCard" class="card">
       <div class="row" style="align-items:baseline;margin-bottom:14px">
@@ -398,6 +416,11 @@ const REFRESH_MS = 3000;
 // A student whose heartbeat is older than this is shown as stale — laptop asleep,
 // app closed, or network gone.
 const STALE_MS = 20000;
+// Stale means "the app stopped checking in a moment ago" — a sleeping laptop, a
+// dropped wifi, a closed lid, all of which come back. Gone is the same silence
+// held long enough that it needs a proctor to look, and it is the signal for a
+// student who force-quit rather than typing a code.
+const GONE_MS = 90000;
 // Signed image URLs live slightly longer than one refresh, so a tile never shows
 // a broken image while the next URL is being minted.
 const SIGNED_TTL = 30;
@@ -1234,6 +1257,122 @@ async function paintGrid(sessions) {
   }
 }
 
+// ===========================================================================
+// How a session ended, and whether that needs somebody to look
+//
+// The evidence is sessions.exit_verified_at, stamped by the server when a correct
+// exit code is typed and by nothing else. The events are only the explanation:
+// a student's own machine writes those, so they are worth reading and not worth
+// trusting. A session that force-quit writes neither, which is the whole point —
+// it goes quiet, and silence is what the heartbeat catches.
+// ===========================================================================
+
+const EXIT_EVENTS = ["exit.code", "exit.passcode", "exit.signal"];
+const notified = new Set();
+
+async function loadExitEvents(sessionIds) {
+  if (!sessionIds.length) return {};
+  const list = `(${sessionIds.join(",")})`;
+  const kinds = `(${EXIT_EVENTS.join(",")})`;
+  try {
+    const rows = await call(
+      `/rest/v1/events?select=session_id,kind,detail,at&session_id=in.${encodeURIComponent(list)}` +
+      `&kind=in.${encodeURIComponent(kinds)}&order=at.desc`) || [];
+    const bySession = {};
+    for (const row of rows) {
+      if (!bySession[row.session_id]) bySession[row.session_id] = row;   // newest wins
+    }
+    return bySession;
+  } catch (error) { return {}; }
+}
+
+function exitVerdict(session, event) {
+  if (session.exit_verified_at) {
+    return { ok: true, label: "released with the exit code" };
+  }
+  if (event && event.kind === "exit.passcode") {
+    return { ok: false, label: "ended with the machine passcode, not the exam's code" };
+  }
+  if (event && event.kind === "exit.signal") {
+    return { ok: false, label: "ended without a code — quit, signal or crash" };
+  }
+  return { ok: false, label: "ended without the exit code" };
+}
+
+// Two things a proctor should not have to notice for themselves: a session that
+// ended without the code, and one that simply stopped talking while it was live.
+async function paintAlerts(sessions) {
+  const ended = sessions.filter((s) => s.status === "ended");
+  const events = await loadExitEvents(ended.map((s) => s.id));
+  const alerts = [];
+
+  for (const session of ended) {
+    const verdict = exitVerdict(session, events[session.id]);
+    if (!verdict.ok) {
+      alerts.push({ session, what: verdict.label, when: session.ended_at });
+    }
+  }
+  for (const session of sessions) {
+    if (!["approved", "active"].includes(session.status)) continue;
+    const since = session.heartbeat_at
+      ? Date.now() - new Date(session.heartbeat_at).getTime() : Infinity;
+    if (since > GONE_MS && session.status === "active") {
+      alerts.push({ session, what: "stopped checking in while the exam was running",
+                    when: session.heartbeat_at });
+    }
+  }
+
+  $("alertCount").textContent = alerts.length;
+  $("alerts").hidden = alerts.length === 0;
+  const list = $("alertList");
+  list.innerHTML = "";
+  for (const alert of alerts) {
+    const row = document.createElement("div");
+    row.className = "alertrow";
+    row.innerHTML = `
+      <div style="min-width:180px">
+        <div style="font-weight:600">${escapeHtml(nameOf(alert.session))}</div>
+        <div class="sub">${ago(alert.when)}</div>
+      </div>
+      <div class="what">${escapeHtml(alert.what)}</div>
+      <div style="margin-left:auto">
+        <button class="small ghost" onclick="openDetail('${alert.session.id}')">Look</button>
+      </div>`;
+    list.appendChild(row);
+    announce(alert);
+  }
+}
+
+// A desktop notification, once per session, so a proctor watching the room rather
+// than the screen still finds out.
+function announce(alert) {
+  const key = `${alert.session.id}:${alert.what}`;
+  if (notified.has(key)) return;
+  notified.add(key);
+  if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
+  try {
+    new Notification("Locked In — " + nameOf(alert.session), {
+      body: alert.what, tag: key,
+    });
+  } catch (error) { /* some browsers refuse outside a user gesture; the panel remains */ }
+}
+
+async function askToNotify() {
+  const state = $("notifyState");
+  if (typeof Notification === "undefined") {
+    state.textContent = "This browser cannot show desktop notifications.";
+    return;
+  }
+  if (Notification.permission === "granted") { state.textContent = ""; return; }
+  if (Notification.permission === "denied") {
+    state.textContent = "Desktop notifications are blocked for this site.";
+    return;
+  }
+  const granted = await Notification.requestPermission();
+  state.textContent = granted === "granted"
+    ? "" : "Desktop notifications are off; this panel still fills up.";
+}
+
 // Sessions that are over. The point of this list is that it survives the exam:
 // the kept frames and the identity photos are still there behind each row, until
 // the exam is deleted.
@@ -1245,6 +1384,7 @@ async function paintFinished(sessions) {
   $("finishedEmpty").hidden = done.length > 0;
 
   const counts = await snapshotCounts(done.map((s) => s.id));
+  const events = await loadExitEvents(done.map((s) => s.id));
   const list = $("finished");
   list.innerHTML = "";
   for (const session of done) {
@@ -1255,6 +1395,11 @@ async function paintFinished(sessions) {
       <div class="meta">
         <div class="name">${escapeHtml(nameOf(session))}</div>
         <div class="sub">finished ${ago(session.ended_at)} · ${lasted(session)}</div>
+        <div class="sub" style="margin-top:4px">${(() => {
+          const verdict = exitVerdict(session, events[session.id]);
+          return `<span class="badge ${verdict.ok ? "good" : "bad"}">${
+            escapeHtml(verdict.label)}</span>`;
+        })()}</div>
         <div class="sub">${keptFramesReadable
           ? `${kept} kept frame${kept === 1 ? "" : "s"}`
           : "kept frames unavailable"}</div>
@@ -1440,6 +1585,7 @@ async function refresh() {
     await paintQueue(sessions);
     await paintGrid(sessions);
     await paintFinished(sessions);
+    await paintAlerts(sessions);
   } catch (error) {
     // Shown once per failure rather than silently: a proctor needs to know the
     // grid has gone stale, not stare at frozen thumbnails.
@@ -1488,6 +1634,7 @@ async function boot() {
   $("whoName").textContent = me.full_name || me.campus_id || "proctor";
 
   await loadExams();
+  askToNotify();
   if (!exams.length) $("newExam").hidden = false;
   refresh();
   clearInterval(timer);
