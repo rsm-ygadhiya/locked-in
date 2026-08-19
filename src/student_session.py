@@ -833,6 +833,8 @@ class CheckIn(tk.Tk):
             "exam_id": self.exam["id"],
             "exam_title": self.exam["title"],
             "allowed_url": self.exam["allowed_url"],
+            # Every other tab this exam allows, in the order they open.
+            "extra_urls": list(self.exam.get("extra_urls") or []),
             # What this exam records, decided by whoever set the exam up rather
             # than by this machine's settings file. Defaults match the columns,
             # so an exam row written before these existed still behaves.

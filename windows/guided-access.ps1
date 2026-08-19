@@ -201,6 +201,13 @@ if ($LASTEXITCODE -eq 0) {
     $LiveTiles    = Handoff-Flag $handoff.live_tiles
     $SnapEvery    = if ($null -eq $handoff.snapshot_interval) { 60 }
                     else { [int]$handoff.snapshot_interval }
+    # The other tabs this exam opens. Their hosts have to reach the allowlist too,
+    # or Chrome loads the exam site and blocks everything the exam provided.
+    $ExtraTabs = @()
+    if ($handoff.extra_urls) { $ExtraTabs = @($handoff.extra_urls | Where-Object { $_ }) }
+    foreach ($tab in $ExtraTabs) {
+        if ($tab -match '^[a-zA-Z]+://([^/]+)') { $AllowHosts += $Matches[1] }
+    }
     if (-not $LiveSession -or -not $handoff.allowed_url) {
         [System.Windows.Forms.MessageBox]::Show(
             "The approval file was unreadable. Not starting the exam.",
@@ -486,7 +493,13 @@ function Kill-OtherWindows {
 }
 
 function Launch-Chrome-Kiosk {
-    Start-Process -FilePath $ChromeExe -ArgumentList "--kiosk", "--disable-features=Translate", $AllowedUrl
+    # One tab is kiosk: no tab strip, nothing to click. Several tabs means the
+    # student has to be able to see and switch them, so full screen with the tab
+    # strip kept. Where they can go is decided by the policy either way; this only
+    # decides how much of the browser they can see.
+    $mode = if ($ExtraTabs -and $ExtraTabs.Count -gt 0) { "--start-fullscreen" } else { "--kiosk" }
+    $args = @($mode, "--disable-features=Translate", $AllowedUrl) + $ExtraTabs
+    Start-Process -FilePath $ChromeExe -ArgumentList $args
 }
 
 function Bring-Chrome-Front {

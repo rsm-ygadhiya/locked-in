@@ -49,6 +49,17 @@ Settings → Privacy & Security. Consequences worth knowing:
 right-click → **Open** → **Open**. Distributing it to a lab means either doing that on
 each machine, or signing it with a paid Developer ID.
 
+**A student closed the window and was looking at their desktop.** Fixed. On macOS
+closing the last window does not quit Chrome — the app stays running with no windows
+— so the lockdown's "is Chrome running" check said yes while nothing was on screen.
+It now notices an empty Chrome and puts the window back, full screen, at the exam.
+Quitting Chrome outright still relaunches it and asks for the code, as before.
+
+**A tab the exam provided keeps reappearing.** That is deliberate: the tabs an exam
+opens are part of it, so closing one puts it back within a fraction of a second.
+Only the tabs listed on the exam behave this way; anything a student opens
+themselves is redirected by the allowlist.
+
 **Chrome does not go fullscreen by itself.** Fixed, and worth knowing what it was:
 the lockdown used to send ⌃⌘F through System Events, which silently does nothing
 unless Terminal has Accessibility permission — so the window came up ordinary and

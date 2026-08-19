@@ -208,6 +208,20 @@ print(flag("record_screen"), flag("record_camera"), flag("record_audio"),
       flag("live_tiles"), data.get("snapshot_interval", 60))
 ' "$HANDOFF" 2>/dev/null
 		)
+		# The other tabs, one per line so a URL with spaces survives the trip.
+		EXAM_TABS=()
+		while IFS= read -r line; do
+			[[ -n "$line" ]] && EXAM_TABS+=("$line")
+		done < <(
+			"$PLAIN_PY" -c '
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    data = json.load(handle)
+for url in data.get("extra_urls") or []:
+    if url:
+        print(url)
+' "$HANDOFF" 2>/dev/null
+		)
 		echo "This exam records: screen=$RECORD_SCREEN camera=$RECORD_CAMERA audio=$RECORD_AUDIO"
 		echo "Live tiles: $LIVE_TILES · kept frames every ${EXAM_SNAP_INTERVAL}s (0 = none)"
 	fi
@@ -219,6 +233,17 @@ print(flag("record_screen"), flag("record_camera"), flag("record_audio"),
 	ALLOWED_URL="$EXAM_URL"
 	EXAM_HOST="$(printf '%s' "$ALLOWED_URL" | sed -E 's#^[a-zA-Z]+://([^/]+).*#\1#')"
 	[[ -n "$EXAM_HOST" ]] && ALLOW_HOSTS+=("$EXAM_HOST")
+	# Every extra tab is only usable if Chrome will load it, so each one's host has
+	# to be on the allowlist as well. An exam that opens a calculator the policy
+	# blocks would show the student a blocked page and nothing else.
+	for tab in "${EXAM_TABS[@]:-}"; do
+		[[ -z "$tab" ]] && continue
+		tab_host="$(printf '%s' "$tab" | sed -E 's#^[a-zA-Z]+://([^/]+).*#\1#')"
+		[[ -n "$tab_host" ]] && ALLOW_HOSTS+=("$tab_host")
+	done
+	if [[ ${#EXAM_TABS[@]:-0} -gt 0 ]]; then
+		echo "This exam also opens: ${EXAM_TABS[*]}"
+	fi
 	PROCTORED=true
 	echo "Approved. Session $LIVE_SESSION_ID"
 fi
@@ -540,7 +565,14 @@ else
 	echo "Floating exit button: not built — quit Chrome to be asked for the code"
 fi
 
-osascript - "$ALLOWED_URL" "$VERIFY_CMD" "$RELEASE_FILE" "$PROMPT_FILE" "${ALLOW_HOSTS[@]}" <<'APPLESCRIPT'
+# The AppleScript takes the tab list as one newline-separated argument, so the
+# allowed-hosts list that follows stays unambiguous however many tabs there are.
+TABS_ARG=""
+if [[ ${#EXAM_TABS[@]:-0} -gt 0 ]]; then
+	TABS_ARG="$(printf '%s\n' "${EXAM_TABS[@]}")"
+fi
+
+osascript - "$ALLOWED_URL" "$VERIFY_CMD" "$RELEASE_FILE" "$PROMPT_FILE" "$TABS_ARG" "${ALLOW_HOSTS[@]}" <<'APPLESCRIPT'
 
 -- Pipe the entry into the verifier on stdin (never as an argument — arguments are
 -- visible to every other process). A non-zero exit raises, which means "wrong".
@@ -555,15 +587,82 @@ end passcodeAccepted
 
 -- POSIX file / "exists" is fussy about paths that do not exist yet, so ask the
 -- shell instead: it is one process every 0.3s and it never raises.
+-- The tab list arrives as one newline-separated argument.
+on splitLines(blob)
+	set out to {}
+	if blob is "" then return out
+	set saved to AppleScript's text item delimiters
+	set AppleScript's text item delimiters to (ASCII character 10)
+	repeat with piece in text items of blob
+		set piece to piece as string
+		if piece is not "" then set end of out to piece
+	end repeat
+	set AppleScript's text item delimiters to saved
+	return out
+end splitLines
+
+-- The host part of a URL, which is what "is this tab still open" is judged on: a
+-- student working inside the allowed site changes the path constantly and has not
+-- closed anything.
+on hostOf(theURL)
+	try
+		set saved to AppleScript's text item delimiters
+		set AppleScript's text item delimiters to "//"
+		set rest to text item 2 of theURL
+		set AppleScript's text item delimiters to "/"
+		set theHost to text item 1 of rest
+		set AppleScript's text item delimiters to saved
+		return theHost
+	on error
+		return theURL
+	end try
+end hostOf
+
+-- Put back any tab the exam is supposed to have. This is the answer to closing a
+-- tab with ⌘W or the window's own close button: it comes straight back, in the
+-- same window, without ending the exam or demanding a code for something a student
+-- may well have done by accident.
+on ensureTabs(requiredURLs)
+	if requiredURLs is {} then return
+	try
+		tell application "Google Chrome"
+			if (count of windows) is 0 then return
+			set openHosts to {}
+			repeat with w from 1 to (count of windows)
+				repeat with t from 1 to (count of tabs of window w)
+					set end of openHosts to my hostOf(URL of tab t of window w)
+				end repeat
+			end repeat
+			repeat with wanted in requiredURLs
+				set wantedHost to my hostOf(wanted as string)
+				if wantedHost is not in openHosts then
+					tell window 1 to make new tab with properties {URL:wanted as string}
+				end if
+			end repeat
+		end tell
+	end try
+end ensureTabs
+
 -- Cold-start Chrome with its own kiosk mode. open -na is what makes the flags
 -- apply: without -n an already-running Chrome just gets a new window and ignores
 -- them, which is the difference between a locked screen and a browser somebody can
 -- ⌘Tab away from.
-on launchKiosk(allowedURL)
+on launchKiosk(allowedURL, extraTabs)
+	-- One tab means kiosk: no tab strip, no omnibox, nothing to click. Several tabs
+	-- means the student has to be able to see and switch them, so it is Chrome's
+	-- own --start-fullscreen instead — same automatic fullscreen, tab strip kept.
+	-- Either way the managed policy is what decides where they can go; this only
+	-- decides how much of the browser they can see.
+	set flags to "--kiosk "
+	if extraTabs is not {} then set flags to "--start-fullscreen "
+	set urls to quoted form of allowedURL
+	repeat with extra in extraTabs
+		set urls to urls & " " & quoted form of (extra as string)
+	end repeat
 	try
-		do shell script "open -na 'Google Chrome' --args --kiosk " & ¬
+		do shell script "open -na 'Google Chrome' --args " & flags & ¬
 			"--disable-session-crashed-bubble --no-first-run --no-default-browser-check " & ¬
-			quoted form of allowedURL
+			urls
 	on error
 		-- No Chrome at that name, or open refused: fall back to the old way so the
 		-- exam still starts.
@@ -592,10 +691,15 @@ on run argv
 	set verifyCmd to item 2 of argv
 	set releaseFile to item 3 of argv
 	set promptFile to item 4 of argv
+	set extraTabs to my splitLines(item 5 of argv)
+	set requiredURLs to {allowedURL}
+	repeat with extra in extraTabs
+		set end of requiredURLs to (extra as string)
+	end repeat
 	set targetApp to "Google Chrome"
-	-- allowed hosts = every arg from the fifth onward
+	-- allowed hosts = every arg from the sixth onward
 	set allowedHosts to {}
-	repeat with i from 5 to (count of argv)
+	repeat with i from 6 to (count of argv)
 		set end of allowedHosts to item i of argv
 	end repeat
 
@@ -625,7 +729,7 @@ on run argv
 	--
 	-- The flags only apply to a cold start, which is why the caller kills Chrome
 	-- first.
-	my launchKiosk(allowedURL)
+	my launchKiosk(allowedURL, extraTabs)
 	delay 2
 	-- Backstop for the case where Chrome was already running and ignored the flags.
 	tell application "System Events"
@@ -657,7 +761,7 @@ on run argv
 			if targetApp is not in runningNames then
 				-- Chrome was closed: relaunch INSTANTLY, in kiosk again, and force it
 				-- back to the site...
-				my launchKiosk(allowedURL)
+				my launchKiosk(allowedURL, extraTabs)
 				delay 1
 				try
 					tell application "Google Chrome"
@@ -704,6 +808,27 @@ on run argv
 					end repeat
 					tell application "Google Chrome" to activate
 				end if
+
+				-- Closing the window is not quitting Chrome: on macOS the app stays
+				-- running with no windows at all, so the check above sees Chrome
+				-- "running" and the student sees their desktop. Put a window back,
+				-- full screen, at the exam.
+				try
+					tell application "Google Chrome"
+						if (count of windows) is 0 then
+							make new window
+							set URL of active tab of front window to allowedURL
+							activate
+							delay 0.4
+							try
+								tell application "System Events" to keystroke "f" using {control down, command down}
+							end try
+						end if
+					end tell
+				end try
+
+				-- Any tab the exam provides that has been closed comes back.
+				my ensureTabs(requiredURLs)
 
 				-- Enforce the whitelist across every tab / window.
 				try

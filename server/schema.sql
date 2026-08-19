@@ -108,6 +108,14 @@ alter table public.exams add column if not exists snapshot_interval integer not 
 -- and a UNIQUE column would make the old exam block the new one forever. The
 -- partial index below is the whole trick: unique among exams that are still live,
 -- silent about the ones that are done.
+-- The other tabs this exam allows: a formula sheet, a calculator, a data file.
+-- allowed_url stays the one the exam opens on and the one a student is sent back to;
+-- these are opened alongside it, and their hosts join the allowlist.
+--
+-- Kept as an array rather than a second table because it is a short list belonging
+-- to one exam, read as a unit, and never queried across exams.
+alter table public.exams add column if not exists extra_urls text[] not null default '{}';
+
 alter table public.exams add column if not exists archived_at timestamptz;
 
 -- The column-level UNIQUE has to go for the partial index to mean anything. Named

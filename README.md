@@ -69,7 +69,7 @@ involves an actual student.
 |---|---|
 | **Recording notice first** | The session is described up front; declining changes nothing on the machine |
 | **Records the session** | Screen, webcam and microphone, to one dated folder per session |
-| **Single site** | Chrome opens in kiosk/full-screen at one allowed URL |
+| **The sites you allow** | Chrome opens full-screen at the exam site, plus any other tabs the exam provides — a formula sheet, a calculator — and nothing else loads |
 | **Everything else blocked** | Chrome managed policy blocklists `*`, allowlists only your hosts |
 | **No escape hatches** | Incognito disabled, DevTools disabled |
 | **Other apps killed** | Non-system apps are quit; you're snapped back to Chrome |

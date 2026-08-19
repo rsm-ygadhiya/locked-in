@@ -230,6 +230,18 @@ frames, timelines — so it is all still there when a grade is queried, and the 
 code is released for the next exam to use. **Delete for good** once the grades are
 settled.
 
+An exam can open **more than one tab**. The row's *+ add another tab* link takes a
+list — a formula sheet, a calculator, a data file — and those open beside the exam
+site when the lockdown starts. Their hosts join the allowlist, which is what makes
+them reachable at all: Chrome's policy blocks everything else whatever the student
+types.
+
+Two things follow from having several tabs. The browser starts full screen with its
+tab strip showing rather than in kiosk mode, because a student has to be able to see
+and switch them. And a tab that gets closed comes straight back, in the same window,
+without ending the exam or asking for a code — closing a tab by accident should not
+be a drama.
+
 Each exam also carries what it records — **Screen**, **Webcam**, **Microphone**,
 **Live tiles**, and how often a frame is kept. Those are the exam's, not the machine's:
 a student sitting this exam records what you chose here whatever their own settings

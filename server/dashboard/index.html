@@ -323,6 +323,12 @@
           <input id="examUrl" placeholder="https://…"></label>
       </div>
       <div class="row">
+        <label class="field grow"><span>Other tabs to open — one per line, optional
+          (formula sheet, calculator, data file)</span>
+          <textarea id="examTabs" rows="2" placeholder="https://…&#10;https://…"
+            style="resize:vertical"></textarea></label>
+      </div>
+      <div class="row">
         <label class="field" style="flex:0 0 200px">
           <span>Join code — read this out to the room</span>
           <input id="examCode" class="mono" placeholder="MID24"
@@ -739,6 +745,10 @@ function paintExams() {
       <div class="who2">
         <div class="t">${escapeHtml(exam.title)}</div>
         <div class="sub">${escapeHtml(exam.allowed_url)}</div>
+        <div class="sub"><a href="#" onclick="editTabs('${exam.id}');return false"
+          style="color:var(--accent)">${(exam.extra_urls || []).length
+            ? `+ ${exam.extra_urls.length} more tab${exam.extra_urls.length === 1 ? "" : "s"}`
+            : "+ add another tab"}</a></div>
       </div>
       <div class="code">
         <span class="lbl">Join code · read out</span>
@@ -963,6 +973,40 @@ function paintArchived(archived) {
   }
 }
 
+// The tabs an exam opens beside its main site. Their hosts join the allowlist, so
+// adding one here is what makes it reachable at all — the policy blocks everything
+// else, whatever the student types.
+async function editTabs(examId) {
+  const exam = exams.find((e) => e.id === examId);
+  if (!exam) return;
+  const answer = prompt(
+    `Other tabs for "${exam.title}", one per line.\n\n` +
+    "They open alongside the exam site and their hosts are added to what Chrome "
+    + "will load. A student who closes one gets it straight back.\n\n"
+    + "Leave empty for none.",
+    (exam.extra_urls || []).join("\n"));
+  if (answer === null) return;
+  const tabs = answer.split(/\s*[\n,]\s*/).map((t) => t.trim()).filter(Boolean);
+  const bad = tabs.find((t) => !/^https?:\/\//i.test(t));
+  if (bad) return toast(`Every tab needs to start with http:// or https:// — ${bad}`, true);
+  try {
+    await call(`/rest/v1/exams?id=eq.${examId}`, {
+      method: "PATCH", headers: { Prefer: "return=minimal" },
+      body: { extra_urls: tabs },
+    });
+    exam.extra_urls = tabs;
+    paintExams();
+    toast(tabs.length
+      ? `${tabs.length} extra tab(s). They open with the exam and cannot be closed for good.`
+      : "No extra tabs — just the exam site.");
+  } catch (error) {
+    toast(missingColumn(error)
+      ? "This project's database has no extra tabs yet. Run server/schema.sql on it "
+        + "again — it adds the column without touching your exams."
+      : "Could not save them: " + error.message, true);
+  }
+}
+
 function toggleCode(examId) {
   if (revealed.has(examId)) { revealed.delete(examId); } else { revealed.add(examId); }
   paintExams();
@@ -1011,8 +1055,13 @@ async function createExam() {
     return toast("The exit code must not be the same as the join code — the whole "
                  + "room knows the join code.", true);
   }
+  const tabs = ($("examTabs").value || "").split(/\s*[\n,]\s*/)
+    .map((t) => t.trim()).filter(Boolean);
+  const bad = tabs.find((t) => !/^https?:\/\//i.test(t));
+  if (bad) return toast(`Every extra tab needs to start with http:// or https:// — ${bad}`, true);
+
   const base = { faculty_id: me.id, title, allowed_url: url, join_code: code,
-                 is_open: true };
+                 is_open: true, extra_urls: tabs };
   const withRecording = {
     ...base,
     record_screen: $("examRecScreen").checked,
@@ -1044,6 +1093,7 @@ async function createExam() {
     if (exit) { await setExitCode(currentExam.id, exit); }
     $("newExam").hidden = true;
     $("examTitle").value = $("examUrl").value = $("examCode").value = "";
+    $("examTabs").value = "";
     $("examExit").value = "";
     await loadExams();
     $("examPick").value = currentExam.id;
