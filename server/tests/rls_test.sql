@@ -4,7 +4,7 @@
 -- The whole proctoring design rests on one claim: a student in full control of
 -- their own laptop, holding the anon key that ships inside the app, still cannot
 -- admit themselves to an exam or see anyone else's data. This file tries to break
--- that claim fourteen different ways and expects to fail every time.
+-- that claim fifteen different ways and expects to fail every time.
 --
 -- Run it with run_tests.sh. Everything happens inside one transaction that is
 -- rolled back at the end, so it leaves no rows behind.
@@ -211,6 +211,27 @@ where id = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
 select count(*) as forged_stamps from public.sessions
 where id = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
   and exit_verified_at > now() + interval '1 minute';
+
+\echo ''
+\echo '### ATTACK 15 — the student releases their own machine'
+-- released_at is what the student app watches to let a machine out. A student who
+-- could write it would not need the exit code at all: they would end their own
+-- session and walk out unlocked, which is the one thing the code exists to stop.
+set test.uid = '22222222-2222-2222-2222-222222222222';
+update public.sessions set released_at = now()
+where id = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+select count(*) as self_released from public.sessions
+where id = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb' and released_at is not null;
+
+\echo ''
+\echo '### the proctor ends the exam, and that does release the machine'
+set test.uid = '11111111-1111-1111-1111-111111111111';
+update public.sessions set released_at = now(), status = 'ended'
+where id = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+select case when released_at is not null then 'RELEASED' else 'NOT-RELEASED' end
+       as release_state
+from public.sessions where id = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+\echo '    PASS'
 
 \echo ''
 \echo '### the proctor writes to the timeline of a session they proctor'

@@ -208,6 +208,13 @@ for over 90 seconds. A closed lid, a dead wifi, a sleeping laptop and a force qu
 identical from the server, which is why it says what it saw rather than what it thinks
 happened. It clears itself if the app comes back.
 
+**End exam did not unlock a machine.** It asks every five seconds, so give it that
+long. Beyond that: the machine has to be able to reach Supabase — a laptop that is
+already offline stays locked, deliberately, because a dropped network is not a
+release. Type the exit code on that one. And if the dashboard warned about a missing
+`released_at` column, the sessions ended but nothing was released: run
+`server/schema.sql` again.
+
 ### Kept frames
 
 **The filmstrips are empty.** Three things to check in order: `snapshot_interval` is

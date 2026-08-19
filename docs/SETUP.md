@@ -302,6 +302,16 @@ leave a student trapped in a locked browser behind a code that does not exist.
 - Click a tile for full-size frames and that student's event timeline.
 - **Close the door** stops new students joining without disturbing anyone already
   running.
+- **End exam** ends it for everyone: every machine still running unlocks itself
+  within a few seconds, Chrome goes back to normal, and the recordings are finalised
+  on the students' own disks. Nothing is deleted, and nobody is flagged — you ending
+  the exam is recorded as yours.
+
+  What makes that safe to hand to the students' own machines is which column carries
+  it. `released_at` can only be written by a proctor; a student who could write it
+  would end their own session and walk out unlocked, which is the one thing the exit
+  code exists to prevent. Their app watches the column and acts on it, and cannot
+  set it.
 
 **Afterwards**: the full-length recordings are on each student's own machine, in
 `~/Desktop/LockedIn-Recordings/`. Only the thumbnails and the two identity photos

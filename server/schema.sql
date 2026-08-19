@@ -213,6 +213,18 @@ create table if not exists public.sessions (
 -- whatever was there, so a student cannot stamp their own clean exit.
 alter table public.sessions add column if not exists exit_verified_at timestamptz;
 
+-- Set by a proctor ending the exam, and by nobody else. The student's app watches
+-- its own row for this and lets the machine go — one button at the front of the
+-- room unlocks every laptop in it.
+--
+-- Why it cannot be the status column doing this job: a student is allowed to move
+-- their own session from active to ended, which is how a normal exit is recorded.
+-- If "ended" were the release signal, a student holding the token that sits in
+-- their own session folder could end their session and walk out unlocked, trading
+-- a red flag on the dashboard for an actual escape. The guard trigger puts this
+-- column back on every student write, so the signal only ever comes from a proctor.
+alter table public.sessions add column if not exists released_at timestamptz;
+
 create index if not exists sessions_exam_status_idx on public.sessions (exam_id, status);
 create index if not exists sessions_student_idx     on public.sessions (student_id);
 
@@ -440,6 +452,11 @@ begin
     if coalesce(current_setting('lockedin.exit_stamp', true), 'off') <> 'on' then
         new.exit_verified_at := old.exit_verified_at;
     end if;
+
+    -- The release is the proctor's to give. A student who could write it could
+    -- unlock their own machine, which is the one thing the exit code exists to
+    -- prevent.
+    new.released_at := old.released_at;
 
     return new;
 end;

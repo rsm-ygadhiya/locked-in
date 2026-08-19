@@ -275,6 +275,7 @@
     <select id="examPick" style="width:auto;min-width:240px"></select>
     <button class="ghost small" id="newExamBtn">New exam</button>
     <button class="ghost small" id="toggleOpenBtn">—</button>
+    <button class="ghost small" id="endExamBtn">End exam</button>
     <button class="ghost small" id="exitCodeBtn">Exit code</button>
     <button class="ghost small" id="deleteExamBtn">Delete exam</button>
     <button class="ghost small" id="addProctorBtn">Add proctor</button>
@@ -981,7 +982,7 @@ function selectExam(examId) {
 function paintOpenButton() {
   const button = $("toggleOpenBtn");
   // Exit code and Delete act on the selected exam, so they disappear with it.
-  for (const id of ["exitCodeBtn", "deleteExamBtn"]) {
+  for (const id of ["exitCodeBtn", "deleteExamBtn", "endExamBtn"]) {
     $(id).hidden = !currentExam;
   }
   if (!currentExam) { button.hidden = true; return; }
@@ -1732,14 +1733,72 @@ function zoom(url) {
   window.open(url, "_blank", "noopener");
 }
 
+// The whole room at once: close the door, end every session still running, and
+// release each of those machines. The release is a column only a proctor can write,
+// so the student's own app can act on it without that becoming a way for a student
+// to let themselves out.
+async function endExam() {
+  if (!currentExam) return;
+  const running = await call(
+    `/rest/v1/sessions?select=id,status&exam_id=eq.${currentExam.id}` +
+    "&status=in.(approved,active)") || [];
+  if (!confirm(
+      `End "${currentExam.title}" for everyone?\n\n` +
+      `${running.length} student(s) are still running. Each of their machines will ` +
+      "unlock itself within a few seconds — Chrome goes back to normal and the " +
+      "recording is finalised on their own disk.\n\n" +
+      "The exam is closed to new students too. Nothing is deleted.")) return;
+
+  const stamp = new Date().toISOString();
+  let released = 0, failed = 0;
+  for (const session of running) {
+    try {
+      await call(`/rest/v1/sessions?id=eq.${session.id}`, {
+        method: "PATCH", headers: { Prefer: "return=minimal" },
+        body: { status: "ended", ended_at: stamp, released_at: stamp },
+      });
+      await call("/rest/v1/events", {
+        method: "POST", headers: { Prefer: "return=minimal" },
+        body: { session_id: session.id, kind: "exit.proctor",
+                detail: `the exam was ended by ${me.full_name || me.campus_id || "a proctor"}` },
+      });
+      released += 1;
+    } catch (error) {
+      failed += 1;
+      if (missingColumn(error)) {
+        toast("This project's database cannot release machines yet — it has no "
+              + "released_at column. Run server/schema.sql on it again. The sessions "
+              + "were still ended.", true);
+        break;
+      }
+    }
+  }
+  try {
+    await call(`/rest/v1/exams?id=eq.${currentExam.id}`, {
+      method: "PATCH", headers: { Prefer: "return=minimal" }, body: { is_open: false },
+    });
+    currentExam.is_open = false;
+    paintOpenButton();
+  } catch (error) { /* the sessions matter more than the door */ }
+
+  await loadExams();
+  toast(failed
+    ? `Ended. ${released} machine(s) releasing, ${failed} could not be reached.`
+    : released
+      ? `Ended. ${released} machine(s) will unlock themselves within a few seconds.`
+      : "Ended, and the door is closed. Nobody was running.");
+  refresh();
+}
+
 async function endSession(sessionId) {
   if (!confirm("End this student's session?\n\n" +
-               "Their lockdown will stop uploading, but it does not unlock their " +
-               "machine — they still need the passcode for that.")) return;
+               "Their machine unlocks itself within a few seconds: Chrome goes back "
+               + "to normal and the recording is finalised on their own disk.")) return;
   try {
     await call(`/rest/v1/sessions?id=eq.${sessionId}`, {
       method: "PATCH", headers: { Prefer: "return=minimal" },
-      body: { status: "ended", ended_at: new Date().toISOString() },
+      body: { status: "ended", ended_at: new Date().toISOString(),
+              released_at: new Date().toISOString() },
     });
     // Say so, so this does not come back as "ended without the exit code". You
     // ending a session is the one ending that needs no explanation.
@@ -1845,6 +1904,7 @@ $("addExamBtn").onclick = () => {
 $("cancelExamBtn").onclick = () => { $("newExam").hidden = true; };
 $("createExamBtn").onclick = createExam;
 $("toggleOpenBtn").onclick = toggleOpen;
+$("endExamBtn").onclick = endExam;
 $("exitCodeBtn").onclick = () => changeExitCode(currentExam && currentExam.id);
 $("deleteExamBtn").onclick = () => deleteExam(currentExam && currentExam.id);
 $("addProctorBtn").onclick = () => {

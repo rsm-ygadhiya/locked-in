@@ -28,9 +28,12 @@ Three reasons it is a separate process rather than threads inside the recorder:
   * a stalled upload must never cost frames of the actual exam recording
   * if the network dies, this can die with it and the recording continues intact
 
-It also owns two things beyond the images: a heartbeat, so the dashboard can tell a
-student whose laptop went to sleep from one who is sitting there working, and the
-final status flip to 'ended' when the session stops.
+It also owns three things beyond the images: a heartbeat, so the dashboard can tell a
+student whose laptop went to sleep from one who is sitting there working; the final
+status flip to 'ended' when the session stops; and the other direction — it asks
+every few seconds whether a proctor has ended the exam, and if so touches the release
+file that lets this machine out. That is how one button at the front of the room
+unlocks every laptop in it.
 
 Run it (the lockdown does this for you):
 
@@ -59,6 +62,7 @@ import lockedin_cloud
 
 STOP = threading.Event()
 POLL = 0.5              # how often the loop wakes to check the clock and STOP
+RELEASE_POLL = 5.0      # how often to ask whether a proctor has ended the exam
 
 
 def log(message: str) -> None:
@@ -132,6 +136,8 @@ def run(cloud: lockedin_cloud.Cloud, session_id: str, session_dir: Path,
 
     next_tick = 0.0
     next_snap = 0.0
+    next_release_check = 0.0
+    released = False
     sent = kept = snap_failures = 0
     while not STOP.is_set():
         if stop_file.exists():
@@ -173,6 +179,26 @@ def run(cloud: lockedin_cloud.Cloud, session_id: str, session_dir: Path,
                     snap_failures += 1
                     if snap_failures in (1, 10, 100):
                         log(f"{tile.kind}: could not keep a frame ({error})")
+
+        # Has a proctor ended the exam? released_at is the one column a student
+        # cannot write, so this is a signal from the front of the room and not from
+        # the laptop it unlocks. The release file is the same one the floating exit
+        # button touches, so the lockdown already knows what to do with it.
+        if not released and now >= next_release_check:
+            next_release_check = now + RELEASE_POLL
+            try:
+                state = cloud.session_status(session_id) or {}
+                if state.get("released_at"):
+                    released = True
+                    log("a proctor ended the exam — releasing this machine")
+                    cloud.log_event(session_id, "exit.proctor",
+                                    "released from the dashboard")
+                    (session_dir / "RELEASE").touch()
+            except lockedin_cloud.CloudError as error:
+                # Offline is not a release. The exam carries on and the machine
+                # stays locked, which is the safe way round.
+                if snap_failures == 0:
+                    log(f"could not check for a release ({error})")
 
         STOP.wait(POLL)
 

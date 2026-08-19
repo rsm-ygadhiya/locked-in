@@ -412,7 +412,8 @@ class Cloud:
 
     def session_status(self, session_id: str) -> dict | None:
         rows = self._json("GET", "/rest/v1/sessions",
-                          params={"select": "status,reject_reason,decided_at",
+                          params={"select": "status,reject_reason,decided_at,"
+                                            "released_at",
                                   "id": f"eq.{session_id}", "limit": 1})
         if isinstance(rows, list) and rows:
             return rows[0]

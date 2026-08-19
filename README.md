@@ -90,6 +90,7 @@ And in proctored mode:
 | **Per-exam exit code** | A code only proctors know ends the lockdown; checked server-side, so it never reaches the student's machine — and you can look it up again behind **Show code** |
 | **Exams you can manage** | Add and delete exams from the dashboard, with both codes on the row and only your own exams listed |
 | **Told when somebody leaves early** | Two signals: a session that ends without the exam's exit code, and one that goes silent for three minutes — a force quit writes nothing, so silence is the only trace it leaves |
+| **End exam from the dashboard** | One button ends it for the room, and every locked machine unlocks itself — carried by a column only a proctor can write |
 | **Live proctoring is optional** | One switch per exam. Off publishes nothing at all — no grid, no kept frames — and still tells you who left without the code |
 | **Archive, don't delete** | An exam that is over keeps everything for the grade queries, and releases its join code for the next one |
 | **Recording is per exam** | Screen, webcam, microphone, live tiles and how often a frame is kept are set on the exam — not on each machine — so the exam decides what it films |
