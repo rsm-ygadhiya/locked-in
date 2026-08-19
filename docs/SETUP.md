@@ -279,11 +279,20 @@ leave a student trapped in a locked browser behind a code that does not exist.
 
 **Proctor**, during:
 
-- **Needs a look** appears at the top the moment a session ends without the exam's
-  exit code being typed, or a running one stops checking in. Both are the shapes a
-  student leaving early makes: quitting the lockdown, force-quitting it, closing the
-  lid, pulling the plug. Each row says which, and desktop notifications fire too if
-  you allow them, so you can watch the room instead of the screen.
+- **Needs a look** collects the two shapes a student leaving early makes, and
+  distinguishes them because they mean different things:
+  - **left** — the session ended and this exam's exit code was never entered. The
+    machine got far enough to say so.
+  - **silent** — the session is still marked running and nothing has been heard
+    from it for three minutes. A force quit, a pulled plug and a closed lid all
+    look like this, because none of them gets to write anything on the way out.
+
+  Three minutes is deliberately far slower than the twenty seconds that greys a
+  tile on the grid: a lid or a wifi hiccup makes a tile go grey constantly and fixes
+  itself, and treating that as an alert is how an alert list becomes wallpaper.
+  Desktop notifications fire once per student if you allow them. A session you end
+  yourself is recorded as yours and is not flagged — and if it had gone quiet first,
+  the timeline says that too.
 
 - The approval queue shows each student's ID photo beside their check-in photo, with
   the name on their account. Approve or refuse; a refusal reason is shown to the

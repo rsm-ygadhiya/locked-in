@@ -89,7 +89,7 @@ And in proctored mode:
 | **Students can't self-admit** | Enforced by a database trigger, not by the app asking nicely |
 | **Per-exam exit code** | A code only proctors know ends the lockdown; checked server-side, so it never reaches the student's machine — and you can look it up again behind **Show code** |
 | **Exams you can manage** | Add and delete exams from the dashboard, with both codes on the row and only your own exams listed |
-| **Told when somebody leaves early** | A session that ends without the exam's exit code is listed, with a desktop notification |
+| **Told when somebody leaves early** | Two signals: a session that ends without the exam's exit code, and one that goes silent for three minutes — a force quit writes nothing, so silence is the only trace it leaves |
 | **Live proctoring is optional** | One switch per exam. Off publishes nothing at all — no grid, no kept frames — and still tells you who left without the code |
 | **Archive, don't delete** | An exam that is over keeps everything for the grade queries, and releases its join code for the next one |
 | **Recording is per exam** | Screen, webcam, microphone, live tiles and how often a frame is kept are set on the exam — not on each machine — so the exam decides what it films |

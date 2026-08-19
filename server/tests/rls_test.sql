@@ -4,7 +4,7 @@
 -- The whole proctoring design rests on one claim: a student in full control of
 -- their own laptop, holding the anon key that ships inside the app, still cannot
 -- admit themselves to an exam or see anyone else's data. This file tries to break
--- that claim thirteen different ways and expects to fail every time.
+-- that claim fourteen different ways and expects to fail every time.
 --
 -- Run it with run_tests.sh. Everything happens inside one transaction that is
 -- rolled back at the end, so it leaves no rows behind.
@@ -213,6 +213,23 @@ where id = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
   and exit_verified_at > now() + interval '1 minute';
 
 \echo ''
+\echo '### the proctor writes to the timeline of a session they proctor'
+-- Ending a session from the dashboard records who ended it here. Without this the
+-- ending is indistinguishable from a student walking out.
+set test.uid = '11111111-1111-1111-1111-111111111111';
+insert into public.events (session_id, kind, detail)
+values ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'exit.proctor',
+        'ended from the dashboard');
+\echo '    PASS'
+
+\echo ''
+\echo '### ATTACK 14 — write to the timeline of an exam you do not proctor'
+set test.uid = '33333333-3333-3333-3333-333333333333';
+savepoint h; insert into public.events (session_id, kind, detail)
+  values ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'exit.code', 'not mine to say');
+rollback to h;
+
+\echo ''
 \echo '### ATTACK 13 — take a join code a live exam is already using'
 -- Not an attack on a student's data; an attack on the one thing a room full of
 -- people relies on being unambiguous. Two live exams answering to MID24 means half
@@ -251,7 +268,7 @@ rollback;
 
 \echo ''
 \echo '============================================================'
-\echo ' Attacks 1, 2, 3, 6, 7, 9 and 13 must each be followed by ERROR.'
+\echo ' Attacks 1, 2, 3, 6, 7, 9, 13 and 14 must be followed by ERROR.'
 \echo ' Attacks 4, 5, 8, 10, 11 and 12 are allowed to run and must have no'
 \echo ' effect: 4 prints "null|null", 5 and 8 print 0.'
 \echo ' Every PASS line must be present. run_tests.sh checks all'

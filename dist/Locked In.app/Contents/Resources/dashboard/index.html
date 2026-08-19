@@ -287,7 +287,7 @@
 
     <section id="alerts" class="card alert" hidden>
       <div class="row" style="align-items:baseline;margin-bottom:10px">
-        <h2 style="margin:0">Left without the exit code (<span id="alertCount">0</span>)</h2>
+        <h2 style="margin:0">Needs a look (<span id="alertCount">0</span>)</h2>
         <span class="sub" id="alertsHint" style="margin-left:14px"></span>
         <span class="sub" style="margin-left:auto" id="notifyState"></span>
       </div>
@@ -426,6 +426,14 @@ const REFRESH_MS = 3000;
 // A student whose heartbeat is older than this is shown as stale — laptop asleep,
 // app closed, or network gone.
 const STALE_MS = 20000;
+// Stale and silent are two different claims on two different clocks, and running
+// them at the same speed is what made the alerts useless before. Stale (20s) greys
+// a tile: the app missed a few check-ins, which a lid or a wifi hiccup does
+// constantly and which fixes itself. Silent (3 minutes) says nobody has heard from
+// this machine in long enough that a person should look — which is what a force
+// quit, a pulled plug and a closed laptop all look like from here, because none of
+// them gets to write anything on the way out.
+const SILENT_MS = 180000;
 // Signed image URLs live slightly longer than one refresh, so a tile never shows
 // a broken image while the next URL is being minted.
 const SIGNED_TTL = 30;
@@ -1428,7 +1436,9 @@ async function loadExitEvents(sessionIds) {
 
 function exitVerdict(session, event) {
   if (event && event.kind === "exit.proctor") {
-    return { ok: true, label: "you ended this session" };
+    return { ok: true, label: /silence/.test(event.detail || "")
+      ? `you ended this session — ${event.detail.split(", ").pop()}`
+      : "you ended this session" };
   }
   if (session.exit_verified_at) {
     return { ok: true, label: "released with the exit code" };
@@ -1458,14 +1468,32 @@ async function paintAlerts(sessions) {
   for (const session of ended) {
     const verdict = exitVerdict(session, events[session.id]);
     if (!verdict.ok) {
-      alerts.push({ session, what: verdict.label, when: session.ended_at });
+      alerts.push({ session, group: "left", what: verdict.label,
+                    when: session.ended_at });
+    }
+  }
+  // The other half, and the only way a force quit is ever noticed: a session that
+  // is still marked running while nothing has been heard from it. Nobody wrote
+  // "I left" because nobody got the chance to.
+  for (const session of sessions) {
+    if (session.status !== "active") continue;
+    const silent = session.heartbeat_at
+      ? Date.now() - new Date(session.heartbeat_at).getTime() : Infinity;
+    if (silent > SILENT_MS) {
+      alerts.push({ session, group: "silent", when: session.heartbeat_at,
+                    what: `no word for ${Math.floor(silent / 60000)} minutes — `
+                          + "force quit, closed lid or lost network" });
     }
   }
 
   $("alertCount").textContent = alerts.length;
   $("alerts").hidden = alerts.length === 0;
+  const left = alerts.filter((a) => a.group === "left").length;
+  const silent = alerts.length - left;
   $("alertsHint").textContent = alerts.length
-    ? "Each of these ended without this exam's exit code being entered."
+    ? [left ? `${left} left without the exit code` : "",
+       silent ? `${silent} went silent while still marked running` : ""]
+      .filter(Boolean).join(" · ")
     : "";
   const list = $("alertList");
   list.innerHTML = "";
@@ -1477,7 +1505,10 @@ async function paintAlerts(sessions) {
         <div style="font-weight:600">${escapeHtml(nameOf(alert.session))}</div>
         <div class="sub">${ago(alert.when)}</div>
       </div>
-      <div class="what">${escapeHtml(alert.what)}</div>
+      <div class="what">
+        <span class="badge bad">${alert.group === "left" ? "left" : "silent"}</span>
+        ${escapeHtml(alert.what)}
+      </div>
       <div style="margin-left:auto">
         <button class="small ghost" onclick="openDetail('${alert.session.id}')">Look</button>
       </div>`;
@@ -1713,10 +1744,19 @@ async function endSession(sessionId) {
     // Say so, so this does not come back as "ended without the exit code". You
     // ending a session is the one ending that needs no explanation.
     try {
+      // If it had gone quiet before you ended it, say so — otherwise ending it
+      // erases the only record that it went quiet at all.
+      const row = (await call(`/rest/v1/sessions?select=heartbeat_at&id=eq.${sessionId}`) || [])[0];
+      const silent = row && row.heartbeat_at
+        ? Date.now() - new Date(row.heartbeat_at).getTime() : 0;
+      const who = me.full_name || me.campus_id || "a proctor";
       await call("/rest/v1/events", {
         method: "POST", headers: { Prefer: "return=minimal" },
         body: { session_id: sessionId, kind: "exit.proctor",
-                detail: `ended from the dashboard by ${me.full_name || me.campus_id || "a proctor"}` },
+                detail: silent > SILENT_MS
+                  ? `ended from the dashboard by ${who}, after ${
+                      Math.floor(silent / 60000)} minutes of silence`
+                  : `ended from the dashboard by ${who}` },
       });
     } catch (error) { /* the ending matters more than the note about it */ }
     closeDetail();

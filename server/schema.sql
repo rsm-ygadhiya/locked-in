@@ -654,6 +654,7 @@ drop policy if exists snapshots_student_insert on public.snapshots;
 drop policy if exists snapshots_read           on public.snapshots;
 drop policy if exists snapshots_faculty_delete on public.snapshots;
 drop policy if exists events_student_insert    on public.events;
+drop policy if exists events_faculty_insert    on public.events;
 drop policy if exists events_read              on public.events;
 
 -- profiles ------------------------------------------------------------------
@@ -782,6 +783,13 @@ create policy snapshots_faculty_delete on public.snapshots
 
 create policy events_student_insert on public.events
     for insert with check (public.owns_session(session_id));
+
+-- The proctor writes to this timeline too, and not being able to was a real bug:
+-- ending a session from the dashboard records "ended by a proctor" there, and
+-- without it that ending was indistinguishable from a student walking out — the
+-- session came back flagged as having left without the exit code.
+create policy events_faculty_insert on public.events
+    for insert with check (public.proctors_session(session_id));
 
 create policy events_read on public.events
     for select using (

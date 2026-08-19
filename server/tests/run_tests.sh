@@ -65,8 +65,8 @@ echo "$OUTPUT"
 # Counting beats eyeballing the log: a policy that quietly stops rejecting is exactly
 # the kind of regression that still reads as success.
 #
-# The thirteen attacks are blocked in two different ways, and both have to be checked:
-#   * seven are refused outright, and must raise an error (1, 2, 3, 6, 7, 9, 13)
+# The fourteen attacks are blocked in two different ways, and both have to be checked:
+#   * eight are refused outright, and must raise an error (1, 2, 3, 6, 7, 9, 13, 14)
 #   * six are allowed to run but must have no effect      (4, 5, 8, 10, 11, 12) — forged
 #     writes that are silently discarded, reads that must come back empty, and a delete
 #     of somebody else's evidence that must remove nothing
@@ -81,12 +81,12 @@ printf 'attacks attempted:  %s\n' "$ATTACKS"
 printf 'refused with error: %s (expected %s)\n' "$ERRORS" "$EXPECTED_ERRORS"
 printf 'allowed actions:    %s\n' "$PASSES"
 
-[[ "$ATTACKS" -eq 13 ]] \
-	|| fail "expected 13 attacks in rls_test.sql, found $ATTACKS — the counts below assume 13"
+[[ "$ATTACKS" -eq 14 ]] \
+	|| fail "expected 13 attacks in rls_test.sql, found $ATTACKS — the counts below assume 14"
 [[ "$ERRORS" -eq "$EXPECTED_ERRORS" ]] \
 	|| fail "expected $EXPECTED_ERRORS refusals, saw $ERRORS — an attack got through, or a legitimate action broke"
-[[ "$PASSES" -eq 7 ]] \
-	|| fail "expected 7 legitimate actions to succeed, saw $PASSES"
+[[ "$PASSES" -eq 8 ]] \
+	|| fail "expected 8 legitimate actions to succeed, saw $PASSES"
 
 # The three that are checked by their result rather than by an error.
 grep -q "^null|null$" <<<"$OUTPUT" \

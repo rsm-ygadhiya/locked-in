@@ -185,10 +185,16 @@ typed, and the lockdown treated that as a wrong code rather than as "this exam h
 code", so the machine's own passcode was never tried and Force Quit was the only way
 out. The lockdown now asks whether the exam has a code before refusing.
 
-**A student force-quit and nothing was flagged.** By design, since you asked for
-flags on leaving rather than on silence: a force quit writes nothing, so there is no
-"leaving" to report. It shows as a red tile on the live grid while the exam runs, and
-that is the only sign. If the grid is off too, there is none.
+**A student force-quit and nothing was flagged yet.** Give it three minutes. A force
+quit writes nothing on the way out, so the only evidence is the silence that follows,
+and the silent alert waits three minutes before believing it. That is on purpose: at
+twenty seconds — the speed that greys a tile — a closed lid would raise an alert every
+time somebody carried a laptop across a room.
+
+**A "silent" alert for a student who is sitting right there.** Their app stopped
+checking in: asleep, off the network, or the uploader died while the exam carried on.
+The dashboard reports what it saw rather than guessing which. Ending the session
+records that it had been quiet, so the timeline keeps the distinction.
 
 **"Ended without the exit code" on somebody who finished normally.** The stamp comes
 from the server when a correct exit code is verified, so it means exactly one thing:
