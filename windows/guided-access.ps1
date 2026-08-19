@@ -392,7 +392,24 @@ function Test-ExitCode([string]$entry) {
             $proc.StandardInput.Close()
             $proc.WaitForExit()
             if ($proc.ExitCode -eq 0) { return $true }
-            if ($proc.ExitCode -eq 1) { return $false }
+            if ($proc.ExitCode -eq 1) {
+                # A plain no covers two different things, and only one of them is a
+                # wrong code. An exam whose proctor never set an exit code answers no
+                # to everything, and treating that as wrong leaves the student behind
+                # a code that does not exist.
+                $ask = New-Object System.Diagnostics.ProcessStartInfo
+                $ask.FileName = $PyExe
+                $ask.Arguments = Quote-Args ($PyArgs + @($CloudPy, "has-exit-code", $LiveExam, $tokenFile))
+                $ask.UseShellExecute = $false
+                $ask.CreateNoWindow = $true
+                try {
+                    $probe = [System.Diagnostics.Process]::Start($ask)
+                    $probe.WaitForExit()
+                    if ($probe.ExitCode -eq 0) { return $false }   # it has one; that was not it
+                } catch { }
+                # No exit code on this exam, or we could not ask: the machine's own
+                # passcode below is the way out.
+            }
             # exit 2 = could not ask; fall through to the local passcode below.
         }
     }

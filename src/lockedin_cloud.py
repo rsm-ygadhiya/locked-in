@@ -567,6 +567,38 @@ def main(argv: list[str]) -> int:
             print(f"cannot verify: {error}", file=sys.stderr)
             return 2
 
+    if command == "has-exit-code":
+        # Used by the lockdown to tell "wrong code" apart from "this exam never set
+        # one". Both come back from verify-exit as a plain no, and treating the
+        # second like the first is what would trap a student behind a code that does
+        # not exist.
+        #
+        #     has-exit-code <exam-id> <token-file>
+        #     exit 0 set · 1 not set · 2 could not ask
+        if len(argv) < 3:
+            print("usage: has-exit-code <exam-id> <token-file>", file=sys.stderr)
+            return 2
+        exam_id, token_path = argv[1], argv[2]
+        try:
+            cloud = Cloud.from_config()
+            token = json.loads(Path(token_path).expanduser().read_text())
+        except (CloudError, OSError, ValueError) as error:
+            print(f"cannot ask: {error}", file=sys.stderr)
+            return 2
+        cloud.session = Session(
+            user_id=token.get("user_id", ""),
+            access_token=token.get("access_token", ""),
+            refresh_token=token.get("refresh_token", ""),
+            expires_at=time.time() + 60,
+            email=token.get("email", ""),
+            role=token.get("role", "student"),
+        )
+        try:
+            return 0 if cloud.exam_has_exit_code(exam_id) else 1
+        except CloudError as error:
+            print(f"cannot ask: {error}", file=sys.stderr)
+            return 2
+
     if command == "login":
         import getpass
         cloud = Cloud.from_config()

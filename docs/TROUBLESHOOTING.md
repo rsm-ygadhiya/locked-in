@@ -153,6 +153,13 @@ building it means no pill — the lockdown says so at startup and carries on, an
 quitting Chrome still asks for the code. Check `overlay.log` in the session folder:
 it records where the pill thinks it put itself.
 
+**The exit code is rejected.** Two codes exist and they are not interchangeable. In a
+proctored exam the lockdown wants *that exam's* exit code, checked by the server — the
+machine's own passcode is only accepted when the server cannot be reached, or when the
+exam has no exit code at all. Look the exam's code up in the dashboard under **Your
+exams → Show code**. If it still fails, check the student is sitting the exam you think
+they are: the code is per-exam, so the code for `MID24` is not the code for `FINAL`.
+
 **It's off screen, or somewhere annoying.** It remembers where it was last dragged to,
 in `~/Library/Application Support/LockedIn/overlay-position.json`. Delete that file and
 it goes back to the bottom-right corner.
@@ -171,6 +178,12 @@ out.
 someone who knows the exit code, which is the proctor's, and the code is checked by the
 server rather than on the machine. If you would still rather not have it, delete
 `LockedInOverlay` from the bundle's `Resources/`.
+
+**A student is stuck behind a code nobody set.** Fixed, and worth knowing if you are
+running an older copy: an exam created without an exit code answered "no" to every code
+typed, and the lockdown treated that as a wrong code rather than as "this exam has no
+code", so the machine's own passcode was never tried and Force Quit was the only way
+out. The lockdown now asks whether the exam has a code before refusing.
 
 ### Kept frames
 

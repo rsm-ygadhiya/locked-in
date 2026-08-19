@@ -410,15 +410,25 @@ if [[ "$PROCTORED" == true && -n "$LIVE_EXAM_ID" && -n "$CLOUD_PY" ]]; then
 	{
 		echo '#!/bin/bash'
 		echo '# Written per session by guided-access.command. Reads the typed code on'
-		echo '# stdin. 0 = correct, 1 = wrong, and an unreachable server falls back to'
-		echo '# the local passcode so nobody is ever trapped.'
+		echo '# stdin. 0 = correct, 1 = wrong.'
+		echo '#'
+		echo '# Two things fall through to the local passcode, and neither is optional:'
+		echo '# an unreachable server, and an exam whose proctor never set an exit code.'
+		echo '# The second one used to be treated as a wrong code, which left the'
+		echo '# student behind a code that did not exist, with Force Quit as the only'
+		echo '# way out.'
 		echo 'code="$(cat)"'
 		printf 'printf %%s "$code" | %s verify-exit %q %q >/dev/null 2>&1\n' \
 			"$(printf '%q ' "${PY_RUNNER[@]}" "$CLOUD_PY")" \
 			"$LIVE_EXAM_ID" "$SESSION_DIR/token.json"
 		echo 'rc=$?'
 		echo '[[ $rc -eq 0 ]] && exit 0'
-		echo '[[ $rc -eq 1 ]] && exit 1'
+		printf 'if [[ $rc -eq 1 ]]; then\n'
+		printf '\t%s has-exit-code %q %q >/dev/null 2>&1\n' \
+			"$(printf '%q ' "${PY_RUNNER[@]}" "$CLOUD_PY")" \
+			"$LIVE_EXAM_ID" "$SESSION_DIR/token.json"
+		printf '\t[[ $? -eq 0 ]] && exit 1   # the exam has a code, and that was not it\n'
+		printf 'fi\n'
 		printf 'printf %%s "$code" | %s verify-passcode >/dev/null 2>&1\n' \
 			"$(printf '%q ' "${PY_RUNNER[@]}" "$CONFIG_PY")"
 	} >"$EXIT_HELPER"

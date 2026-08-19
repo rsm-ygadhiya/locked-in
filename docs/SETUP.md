@@ -245,8 +245,9 @@ gets taken over now hands over the exit codes for that proctor's own exams, whic
 the price of not having to reset a code every time somebody forgets it.
 
 If the network is down when you try to release a machine, the check falls back to
-that machine's local passcode (Faculty → Exam settings → Security). That fallback is
-deliberate: failing closed would leave a student trapped in a locked browser.
+that machine's local passcode (Faculty → Exam settings → Security). So does an exam
+that never had an exit code set. Both fallbacks are deliberate: failing closed would
+leave a student trapped in a locked browser behind a code that does not exist.
 
 **Students**:
 

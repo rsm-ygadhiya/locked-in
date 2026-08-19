@@ -212,7 +212,9 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1) { exit(0) }
                 } else {
                     self.field.stringValue = ""
-                    self.note.stringValue = "That code was not accepted."
+                    // Worth naming which code, because there are two and the wrong
+                    // guess is always the machine's own passcode.
+                    self.note.stringValue = "Not accepted. This exam's own exit code."
                 }
             }
         }
